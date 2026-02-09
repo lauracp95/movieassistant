@@ -1,100 +1,68 @@
 import os
+
 import requests
 import streamlit as st
 
-API_URL = os.environ.get("API_URL", "http://localhost:8000")
+BACKEND_URL = os.environ.get("BACKEND_URL", os.environ.get("API_URL", "http://localhost:8000"))
 
-st.set_page_config(page_title="Training Track UI", layout="centered")
-st.title("Training Track UI")
-st.caption(f"API_URL: {API_URL}")
+st.set_page_config(
+    page_title="Movie Night Assistant",
+    page_icon="🎬",
+    layout="centered",
+)
 
-st.divider()
+st.title("🎬 Movie Night Assistant")
+st.caption("Your friendly helper for planning the perfect movie night")
 
-# ---------- Health ----------
-st.subheader("API status")
-if st.button("Check /health"):
-    try:
-        r = requests.get(f"{API_URL}/health", timeout=5)
-        if r.status_code >= 400:
-            st.error(f"Error: {r.status_code} - {r.text}")
-        else:
-            st.success("API reachable")
-            st.json(r.json())
-    except requests.RequestException as e:
-        st.error(f"Could not reach API: {e}")
-
-st.divider()
-
-# ---------- Create item ----------
-st.subheader("Create item")
-
-with st.form("create_item_form"):
-    text = st.text_input("Text", placeholder="Buy milk")
-    is_done = st.checkbox("Done?", value=False)
-    submitted = st.form_submit_button("Create")
-
-if submitted:
-    try:
-        payload = {"text": text if text.strip() else None, "is_done": is_done}
-        r = requests.post(f"{API_URL}/items", json=payload, timeout=5)
-        if r.status_code >= 400:
-            st.error(f"Error: {r.status_code} - {r.text}")
-        else:
-            st.success("Item created")
-            st.write("Current items list:")
-            st.dataframe(r.json(), use_container_width=True)
-    except requests.RequestException as e:
-        st.error(f"Request failed: {e}")
-
-st.divider()
-
-# ---------- List items ----------
-st.subheader("List items")
-limit = st.number_input("Limit", min_value=1, max_value=100, value=10, step=1)
-
-col1, col2 = st.columns(2)
-with col1:
-    fetch_items = st.button("Fetch /items")
-with col2:
-    show_raw = st.toggle("Show raw JSON", value=False)
-
-if fetch_items:
-    try:
-        r = requests.get(f"{API_URL}/items", params={"limit": int(limit)}, timeout=5)
-        if r.status_code >= 400:
-            st.error(f"Error: {r.status_code} - {r.text}")
-        else:
-            data = r.json()
-            if not data:
-                st.info("No items yet.")
+with st.sidebar:
+    st.header("Backend Status")
+    if st.button("Check Health", use_container_width=True):
+        try:
+            r = requests.get(f"{BACKEND_URL}/health", timeout=5)
+            if r.status_code == 200:
+                st.success("✅ Backend is healthy")
             else:
-                st.dataframe(data, use_container_width=True)
-                if show_raw:
-                    st.json(data)
-    except requests.RequestException as e:
-        st.error(f"Request failed: {e}")
+                st.error(f"❌ Status: {r.status_code}")
+        except requests.RequestException as e:
+            st.error(f"❌ Cannot reach backend: {e}")
+    
+    st.divider()
+    st.caption(f"Backend: {BACKEND_URL}")
 
-st.divider()
+if "messages" not in st.session_state:
+    st.session_state.messages = []
 
-# ---------- Get item by ID ----------
-st.subheader("Get item by ID")
-item_id = st.number_input("Item ID", min_value=0, value=0, step=1)
+for msg in st.session_state.messages:
+    with st.chat_message(msg["role"]):
+        st.markdown(msg["content"])
 
-if st.button("Fetch /items/{id}"):
-    try:
-        r = requests.get(f"{API_URL}/items/{int(item_id)}", timeout=5)
-        if r.status_code == 404:
-            # API devuelve {"detail": "..."}
+if prompt := st.chat_input("What would you like to watch tonight?"):
+    st.session_state.messages.append({"role": "user", "content": prompt})
+    with st.chat_message("user"):
+        st.markdown(prompt)
+    
+    with st.chat_message("assistant"):
+        with st.spinner("Thinking..."):
             try:
-                st.warning(r.json().get("detail", "Not found"))
-            except Exception:
-                st.warning("Not found")
-        elif r.status_code >= 400:
-            st.error(f"Error: {r.status_code} - {r.text}")
-        else:
-            st.success("Item found")
-            st.json(r.json())
-    except requests.RequestException as e:
-        st.error(f"Request failed: {e}")
-
-st.caption("Tip: With Docker Compose, set API_URL=http://api:8000 for the UI service.")
+                r = requests.post(
+                    f"{BACKEND_URL}/chat",
+                    json={"message": prompt},
+                    timeout=60,
+                )
+                
+                if r.status_code == 200:
+                    reply = r.json().get("reply", "No response received")
+                    st.markdown(reply)
+                    st.session_state.messages.append({"role": "assistant", "content": reply})
+                elif r.status_code == 422:
+                    error_msg = "Invalid message. Please enter some text."
+                    st.error(error_msg)
+                    st.session_state.messages.append({"role": "assistant", "content": f"❌ {error_msg}"})
+                else:
+                    error_msg = f"Error: {r.status_code} - {r.json().get('detail', 'Unknown error')}"
+                    st.error(error_msg)
+                    st.session_state.messages.append({"role": "assistant", "content": f"❌ {error_msg}"})
+            except requests.RequestException as e:
+                error_msg = f"Failed to connect to backend: {e}"
+                st.error(error_msg)
+                st.session_state.messages.append({"role": "assistant", "content": f"❌ {error_msg}"})

@@ -4,12 +4,19 @@ services:
       context: ./api
     ports:
       - "8000:8000"
+    environment:
+      - AZURE_OPENAI_ENDPOINT=${AZURE_OPENAI_ENDPOINT}
+      - AZURE_OPENAI_API_KEY=${AZURE_OPENAI_API_KEY}
+      - AZURE_OPENAI_API_VERSION=${AZURE_OPENAI_API_VERSION}
+      - AZURE_OPENAI_DEPLOYMENT=${AZURE_OPENAI_DEPLOYMENT}
+      - TEMPERATURE=${TEMPERATURE:-0.7}
+      - MAX_TOKENS=${MAX_TOKENS:-}
 
   ui:
     build:
       context: ./ui
     environment:
-      - API_URL=http://api:8000
+      - BACKEND_URL=http://api:8000
     ports:
       - "8501:8501"
     depends_on:
