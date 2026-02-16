@@ -1,3 +1,4 @@
+# BaseSettings automatically reads values from environment variables
 from pydantic_settings import BaseSettings
 from pydantic import Field
 
@@ -16,6 +17,7 @@ class Settings(BaseSettings):
         - MAX_TOKENS: Maximum tokens in response (optional)
     """
     
+    # Field(...) = required, no default → app crashes if missing
     azure_openai_endpoint: str = Field(
         ...,
         description="Azure OpenAI resource endpoint (e.g., https://<resource>.openai.azure.com/)"
@@ -32,21 +34,27 @@ class Settings(BaseSettings):
         ...,
         description="Azure OpenAI deployment name for the chat model"
     )
+    
+    # Optional fields with defaults
     temperature: float = Field(
         default=0.7,
         ge=0.0,
         le=2.0,
         description="Model temperature for response generation"
     )
+    # None means "no limit" (let Azure use its default)
     max_tokens: int | None = Field(
         default=None,
         gt=0,
         description="Maximum tokens in the response (optional)"
     )
 
+    # model_config tells Pydantic how to load settings
     model_config = {
+        # Look for .env file in parent dir (project root) and current dir
         "env_file": ("../.env", ".env"),
         "env_file_encoding": "utf-8",
+        # Ignore extra env vars that don't match our fields
         "extra": "ignore",
     }
 
@@ -58,4 +66,3 @@ def get_settings() -> Settings:
         ValidationError: If required environment variables are missing or invalid.
     """
     return Settings()
-

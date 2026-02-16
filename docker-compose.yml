@@ -4,13 +4,16 @@ services:
       context: ./api
     ports:
       - "8000:8000"
+    env_file:
+      - path: .env
+        required: false
     environment:
       - AZURE_OPENAI_ENDPOINT=${AZURE_OPENAI_ENDPOINT}
       - AZURE_OPENAI_API_KEY=${AZURE_OPENAI_API_KEY}
       - AZURE_OPENAI_API_VERSION=${AZURE_OPENAI_API_VERSION}
       - AZURE_OPENAI_DEPLOYMENT=${AZURE_OPENAI_DEPLOYMENT}
       - TEMPERATURE=${TEMPERATURE:-0.7}
-      - MAX_TOKENS=${MAX_TOKENS:-}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
 
   ui:
     build:

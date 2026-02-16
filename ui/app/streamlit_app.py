@@ -25,7 +25,11 @@ with st.sidebar:
                 st.error(f"❌ Status: {r.status_code}")
         except requests.RequestException as e:
             st.error(f"❌ Cannot reach backend: {e}")
-    
+
+    st.divider()
+
+    show_debug = st.checkbox("Show debug info", value=False)
+
     st.divider()
     st.caption(f"Backend: {BACKEND_URL}")
 
@@ -35,12 +39,15 @@ if "messages" not in st.session_state:
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
+        if show_debug and msg.get("debug"):
+            with st.expander("Debug Info"):
+                st.json(msg["debug"])
 
 if prompt := st.chat_input("What would you like to watch tonight?"):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.markdown(prompt)
-    
+
     with st.chat_message("assistant"):
         with st.spinner("Thinking..."):
             try:
@@ -49,11 +56,27 @@ if prompt := st.chat_input("What would you like to watch tonight?"):
                     json={"message": prompt},
                     timeout=60,
                 )
-                
+
                 if r.status_code == 200:
-                    reply = r.json().get("reply", "No response received")
+                    data = r.json()
+                    reply = data.get("reply", "No response received")
+                    route = data.get("route")
+                    constraints = data.get("extracted_constraints")
+
                     st.markdown(reply)
-                    st.session_state.messages.append({"role": "assistant", "content": reply})
+
+                    debug_info = None
+                    if route or constraints:
+                        debug_info = {"route": route, "constraints": constraints}
+                        if show_debug:
+                            with st.expander("Debug Info"):
+                                st.json(debug_info)
+
+                    st.session_state.messages.append({
+                        "role": "assistant",
+                        "content": reply,
+                        "debug": debug_info,
+                    })
                 elif r.status_code == 422:
                     error_msg = "Invalid message. Please enter some text."
                     st.error(error_msg)
