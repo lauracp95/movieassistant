@@ -2,39 +2,32 @@ import logging
 
 from fastapi import APIRouter, HTTPException
 
-from app.agents import OrchestratorAgent, MoviesResponder, SystemResponder
+from app.llm.workflow import MovieNightWorkflow
 from app.schemas import ChatRequest, ChatResponse, HealthResponse
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-orchestrator: OrchestratorAgent | None = None
-movies_responder: MoviesResponder | None = None
-system_responder: SystemResponder | None = None
+workflow: MovieNightWorkflow | None = None
 
 
-def initialize_agents(
-    orch: OrchestratorAgent,
-    movies: MoviesResponder,
-    system: SystemResponder,
-) -> None:
-    """Initialize the route handlers with agent instances.
+def initialize_workflow(wf: MovieNightWorkflow) -> None:
+    """Initialize the route handlers with a workflow instance.
 
     Called during application startup.
+
+    Args:
+        wf: The compiled MovieNightWorkflow instance.
     """
-    global orchestrator, movies_responder, system_responder
-    orchestrator = orch
-    movies_responder = movies
-    system_responder = system
+    global workflow
+    workflow = wf
 
 
-def cleanup_agents() -> None:
-    """Clean up agent instances during shutdown."""
-    global orchestrator, movies_responder, system_responder
-    orchestrator = None
-    movies_responder = None
-    system_responder = None
+def cleanup_workflow() -> None:
+    """Clean up workflow instance during shutdown."""
+    global workflow
+    workflow = None
 
 
 @router.get("/health", response_model=HealthResponse)
@@ -45,10 +38,10 @@ def health() -> HealthResponse:
 
 @router.post("/chat", response_model=ChatResponse)
 def chat(request: ChatRequest) -> ChatResponse:
-    """Process a chat message using the orchestrator and responders.
+    """Process a chat message through the LangGraph workflow.
 
-    The orchestrator classifies the intent and extracts constraints.
-    Based on the decision, the appropriate responder generates a reply.
+    The workflow orchestrates intent classification, constraint extraction,
+    and response generation through a series of graph nodes.
 
     Args:
         request: The chat request containing the user message.
@@ -57,44 +50,31 @@ def chat(request: ChatRequest) -> ChatResponse:
         The assistant's response with optional route and constraint info.
 
     Raises:
-        HTTPException: If agents are not initialized (500) or LLM call fails (500).
+        HTTPException: If workflow is not initialized (500) or execution fails (500).
     """
-    if orchestrator is None or movies_responder is None or system_responder is None:
+    if workflow is None:
         raise HTTPException(
             status_code=500,
-            detail="Agents not initialized",
+            detail="Workflow not initialized",
         )
 
     try:
         logger.info(f"Processing chat request: {request.message[:50]}...")
 
-        decision = orchestrator.decide(request.message)
+        reply, route, constraints = workflow.get_response(request.message)
 
-        logger.debug(
-            f"Orchestrator decision: intent={decision.intent}, "
-            f"needs_clarification={decision.needs_clarification}, "
-            f"constraints={decision.constraints}"
-        )
-
-        if decision.needs_clarification:
-            reply = decision.clarification_question or "Could you please clarify what you're looking for?"
-            return ChatResponse(
-                reply=reply,
-                route=decision.intent,
-                extracted_constraints=decision.constraints,
-            )
-
-        if decision.intent == "movies":
-            reply = movies_responder.respond(request.message, decision.constraints)
-        else:
-            reply = system_responder.respond(request.message)
+        route_value = None
+        if route in ("movies", "system"):
+            route_value = route
+        elif route == "clarification":
+            route_value = "movies"
 
         logger.info(f"Chat response generated successfully ({len(reply)} chars)")
 
         return ChatResponse(
             reply=reply,
-            route=decision.intent,
-            extracted_constraints=decision.constraints,
+            route=route_value,
+            extracted_constraints=constraints,
         )
 
     except Exception as e:

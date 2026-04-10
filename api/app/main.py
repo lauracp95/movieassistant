@@ -6,8 +6,9 @@ from fastapi import FastAPI
 from pydantic import ValidationError
 
 from app.agents import OrchestratorAgent, MoviesResponder, SystemResponder
-from app.api.routes import router, initialize_agents, cleanup_agents
+from app.api.routes import router, initialize_workflow, cleanup_workflow
 from app.llm import create_chat_model
+from app.llm.workflow import MovieNightWorkflow
 from app.settings import get_settings
 
 logging.basicConfig(
@@ -19,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Initialize agents on startup, clean up on shutdown."""
+    """Initialize workflow on startup, clean up on shutdown."""
     try:
         settings = get_settings()
 
@@ -30,18 +31,18 @@ async def lifespan(app: FastAPI):
         movies_responder = MoviesResponder(llm)
         system_responder = SystemResponder(llm)
 
-        initialize_agents(orchestrator, movies_responder, system_responder)
-        logger.info("Movie Assistant agents initialized successfully")
+        workflow = MovieNightWorkflow(orchestrator, movies_responder, system_responder)
+        initialize_workflow(workflow)
+        logger.info("Movie Assistant workflow initialized successfully")
 
     except ValidationError as e:
         logger.error(f"Configuration error: {e}")
         raise SystemExit("Failed to start: missing or invalid configuration. Check environment variables.")
 
-    # Everything before yield = startup, everything after yield = shutdown.
     yield
 
-    cleanup_agents()
-    logger.info("Movie Assistant agents cleaned up")
+    cleanup_workflow()
+    logger.info("Movie Assistant workflow cleaned up")
 
 
 app = FastAPI(
