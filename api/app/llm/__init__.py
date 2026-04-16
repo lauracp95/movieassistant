@@ -1,4 +1,9 @@
 from app.llm.client import create_chat_model
+from app.llm.movie_finder_agent import (
+    MovieFinderAgent,
+    StubMovieFinderAgent,
+    TMDBMovieFinderAgent,
+)
 from app.llm.prompts import (
     INPUT_ORCHESTRATOR_SYSTEM_PROMPT,
     MOVIES_RESPONDER_SYSTEM_PROMPT,
@@ -16,6 +21,9 @@ from app.llm.state import (
 
 __all__ = [
     "create_chat_model",
+    "MovieFinderAgent",
+    "StubMovieFinderAgent",
+    "TMDBMovieFinderAgent",
     "INPUT_ORCHESTRATOR_SYSTEM_PROMPT",
     "ORCHESTRATOR_SYSTEM_PROMPT",
     "MOVIES_RESPONDER_SYSTEM_PROMPT",

@@ -4,7 +4,7 @@ from pydantic import Field
 
 
 class Settings(BaseSettings):
-    """Configuration settings for Azure OpenAI integration.
+    """Configuration settings for Azure OpenAI and external APIs.
     
     Required environment variables:
         - AZURE_OPENAI_ENDPOINT: Azure OpenAI resource endpoint
@@ -15,6 +15,8 @@ class Settings(BaseSettings):
     Optional:
         - TEMPERATURE: Model temperature (default: 0.7)
         - MAX_TOKENS: Maximum tokens in response (optional)
+        - TMDB_API_KEY: TMDB API key for movie retrieval (optional, uses stub if not set)
+        - MOVIE_FINDER_MODE: "tmdb" or "stub" (default: auto-detect based on API key)
     """
     
     # Field(...) = required, no default → app crashes if missing
@@ -47,6 +49,16 @@ class Settings(BaseSettings):
         default=None,
         gt=0,
         description="Maximum tokens in the response (optional)"
+    )
+    
+    # TMDB integration (optional)
+    tmdb_api_key: str | None = Field(
+        default=None,
+        description="TMDB API key for movie retrieval (if not set, uses stub finder)"
+    )
+    movie_finder_mode: str = Field(
+        default="auto",
+        description="Movie finder mode: 'tmdb', 'stub', or 'auto' (auto-detect based on API key)"
     )
 
     # model_config tells Pydantic how to load settings

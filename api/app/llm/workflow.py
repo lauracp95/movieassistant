@@ -5,7 +5,7 @@ messages through the existing MVP behavior. The workflow wraps the
 current orchestrator/responder flow while establishing the architectural
 backbone for future phases.
 
-Graph Shape (Phase 2 - Input Orchestration):
+Graph Shape (Phase 3 - Movie Finder Integration):
 
     START
       |
@@ -14,15 +14,14 @@ Graph Shape (Phase 2 - Input Orchestration):
       |
       v (conditional)
       ├── clarification → END (response already set)
-      ├── movies → [respond]
+      ├── movies → [find_movies] → [respond]
       ├── rag → [respond]
-      └── hybrid → [respond]
+      └── hybrid → [find_movies] → [respond]
       |
       v
     END
 
 Future phases will expand this to include:
-- MovieFinderAgent node
 - RecommendationWriterAgent node
 - EvaluatorAgent node with retry loops
 - RAGAssistantAgent node
@@ -35,6 +34,7 @@ from langgraph.graph import END, START, StateGraph
 
 from app.agents import MoviesResponder, OrchestratorAgent, SystemResponder
 from app.llm.input_agent import InputOrchestratorAgent
+from app.llm.movie_finder_agent import MovieFinderAgent
 from app.llm.state import MovieNightState
 from app.schemas.orchestrator import Constraints
 
@@ -141,6 +141,11 @@ def create_respond_node(
 ) -> Callable[[MovieNightState], dict]:
     """Create the respond node that generates the final response.
 
+    For movie routes, this node uses candidate_movies from state to
+    generate a response. If candidates are available, it formats them
+    into a simple response. The RecommendationWriterAgent (future phase)
+    will handle sophisticated response generation.
+
     Args:
         movies_responder: The MoviesResponder instance.
         system_responder: The SystemResponder instance.
@@ -153,25 +158,134 @@ def create_respond_node(
         route = state.get("route")
         user_message = state["user_message"]
         constraints = state.get("constraints") or Constraints()
+        candidate_movies = state.get("candidate_movies", [])
 
         if route == "clarification":
             logger.info("Respond node: clarification already set, skipping")
             return {}
 
-        logger.info(f"Respond node processing: route={route}")
+        logger.info(
+            f"Respond node processing: route={route}, "
+            f"candidates={len(candidate_movies)}"
+        )
 
-        if route == "movies":
-            reply = movies_responder.respond(user_message, constraints)
+        if route in ("movies", "hybrid"):
+            if candidate_movies:
+                reply = _format_candidate_response(candidate_movies, constraints)
+            else:
+                reply = (
+                    "I couldn't find any movies matching your criteria. "
+                    "Try broadening your search or specifying different preferences."
+                )
         elif route == "rag":
             reply = system_responder.respond(user_message)
-        elif route == "hybrid":
-            reply = movies_responder.respond(user_message, constraints)
         else:
             reply = system_responder.respond(user_message)
 
         return {"final_response": reply}
 
     return respond
+
+
+def _format_candidate_response(
+    candidates: list,
+    constraints: Constraints,
+) -> str:
+    """Format candidate movies into a simple response.
+
+    This is a temporary formatting function. The RecommendationWriterAgent
+    (future phase) will replace this with sophisticated recommendation text.
+
+    Args:
+        candidates: List of MovieResult objects.
+        constraints: User constraints for context.
+
+    Returns:
+        Formatted response string.
+    """
+    if not candidates:
+        return "I couldn't find any movies matching your criteria."
+
+    lines = ["Here are some movie recommendations for you:\n"]
+
+    for i, movie in enumerate(candidates[:5], 1):
+        year_str = f" ({movie.year})" if movie.year else ""
+        genres_str = ", ".join(movie.genres[:3]) if movie.genres else "Unknown genre"
+        rating_str = f" - Rating: {movie.rating:.1f}/10" if movie.rating else ""
+        runtime_str = f" - {movie.runtime_minutes} min" if movie.runtime_minutes else ""
+
+        lines.append(f"{i}. **{movie.title}**{year_str}")
+        lines.append(f"   {genres_str}{runtime_str}{rating_str}")
+
+        if movie.overview:
+            overview = movie.overview[:150] + "..." if len(movie.overview) > 150 else movie.overview
+            lines.append(f"   {overview}")
+        lines.append("")
+
+    return "\n".join(lines)
+
+
+def create_find_movies_node(
+    movie_finder: MovieFinderAgent,
+) -> Callable[[MovieNightState], dict]:
+    """Create the find_movies node that retrieves candidate movies.
+
+    This node uses the MovieFinderAgent to retrieve candidate movies
+    based on user constraints. The candidates are stored in state for
+    subsequent processing by the response node.
+
+    Args:
+        movie_finder: The MovieFinderAgent instance.
+
+    Returns:
+        A node function that populates candidate_movies in state.
+    """
+
+    def find_movies(state: MovieNightState) -> dict:
+        constraints = state.get("constraints") or Constraints()
+        rejected_titles = state.get("rejected_titles", [])
+
+        logger.info(
+            f"Find movies node: constraints={constraints}, "
+            f"rejected={len(rejected_titles)} titles"
+        )
+
+        candidates = movie_finder.find_movies(
+            constraints=constraints,
+            limit=10,
+            excluded_titles=rejected_titles,
+        )
+
+        logger.info(f"Find movies node found {len(candidates)} candidates")
+
+        return {"candidate_movies": candidates}
+
+    return find_movies
+
+
+def route_after_orchestrate(state: MovieNightState) -> str:
+    """Determine the next node after orchestration.
+
+    Routes to:
+    - END if clarification is needed (response already set)
+    - find_movies if route is movies or hybrid (need candidates)
+    - respond if route is rag (no movie retrieval needed)
+
+    Args:
+        state: Current workflow state.
+
+    Returns:
+        Next node name or END.
+    """
+    route = state.get("route")
+
+    if route == "clarification":
+        return END
+
+    if route in ("movies", "hybrid"):
+        return "find_movies"
+
+    return "respond"
 
 
 def should_respond(state: MovieNightState) -> str:
@@ -199,7 +313,9 @@ class MovieNightWorkflow:
 
     Supports two modes:
     - Legacy mode: Uses OrchestratorAgent (Phase 1)
-    - Input agent mode: Uses InputOrchestratorAgent (Phase 2)
+    - Input agent mode: Uses InputOrchestratorAgent (Phase 2/3)
+
+    Phase 3 adds MovieFinderAgent for candidate retrieval.
     """
 
     def __init__(
@@ -208,6 +324,7 @@ class MovieNightWorkflow:
         movies_responder: MoviesResponder,
         system_responder: SystemResponder,
         input_agent: InputOrchestratorAgent | None = None,
+        movie_finder: MovieFinderAgent | None = None,
     ) -> None:
         """Initialize the workflow with agent instances.
 
@@ -217,18 +334,22 @@ class MovieNightWorkflow:
             system_responder: The SystemResponder for system questions.
             input_agent: The InputOrchestratorAgent for Phase 2 routing.
                         If provided, it takes precedence over orchestrator.
+            movie_finder: The MovieFinderAgent for Phase 3 candidate retrieval.
+                         If not provided, skips candidate retrieval step.
         """
         self._orchestrator = orchestrator
         self._input_agent = input_agent
         self._movies_responder = movies_responder
         self._system_responder = system_responder
+        self._movie_finder = movie_finder
         self._graph = self._build_graph()
 
     def _build_graph(self) -> StateGraph:
         """Build and compile the workflow graph.
 
         Uses InputOrchestratorAgent if available, otherwise falls back
-        to legacy OrchestratorAgent.
+        to legacy OrchestratorAgent. If MovieFinderAgent is provided,
+        adds candidate retrieval before response generation.
 
         Returns:
             Compiled StateGraph ready for execution.
@@ -249,9 +370,18 @@ class MovieNightWorkflow:
         builder.add_node("orchestrate", orchestrate_node)
         builder.add_node("respond", respond_node)
 
-        builder.add_edge(START, "orchestrate")
-        builder.add_conditional_edges("orchestrate", should_respond)
-        builder.add_edge("respond", END)
+        if self._movie_finder is not None:
+            find_movies_node = create_find_movies_node(self._movie_finder)
+            builder.add_node("find_movies", find_movies_node)
+
+            builder.add_edge(START, "orchestrate")
+            builder.add_conditional_edges("orchestrate", route_after_orchestrate)
+            builder.add_edge("find_movies", "respond")
+            builder.add_edge("respond", END)
+        else:
+            builder.add_edge(START, "orchestrate")
+            builder.add_conditional_edges("orchestrate", should_respond)
+            builder.add_edge("respond", END)
 
         return builder.compile()
 

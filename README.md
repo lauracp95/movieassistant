@@ -1,6 +1,6 @@
 # Movie Night Assistant
 
-A chat assistant for planning movie nights, powered by Azure OpenAI via LangChain. Features a LangGraph workflow with an Orchestrator Agent that classifies user intent and extracts movie constraints.
+A chat assistant for planning movie nights, powered by Azure OpenAI via LangChain. Features a LangGraph workflow with an Orchestrator Agent that classifies user intent and extracts movie constraints, plus TMDB integration for real movie data.
 
 ## Architecture
 
@@ -9,6 +9,7 @@ A chat assistant for planning movie nights, powered by Azure OpenAI via LangChai
 - **LLM**: Azure OpenAI via LangChain
 - **Workflow**: LangGraph StateGraph for orchestration
 - **Orchestrator Agent**: Classifies intent (movies vs system) and extracts constraints (genres, runtime)
+- **Movie Finder Agent**: Retrieves candidate movies from TMDB (or stub data for testing)
 - **Responders**: Separate response generators for movie requests and system questions
 
 ## How It Works
@@ -34,6 +35,8 @@ A chat assistant for planning movie nights, powered by Azure OpenAI via LangChai
 | `TEMPERATURE` | ❌ | Model temperature (default: 0.7) | `0.7` |
 | `MAX_TOKENS` | ❌ | Max response tokens | `1000` |
 | `LOG_LEVEL` | ❌ | Logging level (default: INFO) | `DEBUG` |
+| `TMDB_API_KEY` | ❌ | TMDB API key for movie data (uses stub if not set) | `abc123...` |
+| `MOVIE_FINDER_MODE` | ❌ | Movie finder mode: `auto`, `tmdb`, or `stub` (default: auto) | `auto` |
 
 ## Setup Environment Variables
 
@@ -186,10 +189,14 @@ Response:
 │   │   ├── api/
 │   │   │   ├── __init__.py
 │   │   │   └── routes.py        # /health and /chat endpoints
+│   │   ├── integrations/
+│   │   │   ├── __init__.py
+│   │   │   └── tmdb_client.py    # TMDB API client
 │   │   ├── llm/
 │   │   │   ├── __init__.py
 │   │   │   ├── client.py         # Azure OpenAI model factory
 │   │   │   ├── model_provider.py # ModelProvider class
+│   │   │   ├── movie_finder_agent.py # Movie finder agents (Stub, TMDB)
 │   │   │   ├── prompts.py        # System prompts for all agents
 │   │   │   ├── state.py          # MovieNightState and workflow constants
 │   │   │   └── workflow.py       # LangGraph workflow skeleton
@@ -214,7 +221,6 @@ Response:
 
 ## Current Limitations
 
-- **No external movie database**: Currently LLM-only, TMDB integration planned for later
 - **Stateless**: No memory between messages
-- **No RAG**: No retrieval-augmented generation
-- **No external tools**: No MCP or API integrations yet
+- **No RAG**: No retrieval-augmented generation yet
+- **Basic response formatting**: Movie recommendations use simple formatting (RecommendationWriterAgent planned)
