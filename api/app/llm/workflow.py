@@ -5,15 +5,18 @@ messages through the existing MVP behavior. The workflow wraps the
 current orchestrator/responder flow while establishing the architectural
 backbone for future phases.
 
-Graph Shape (Phase 1 - Skeleton):
+Graph Shape (Phase 2 - Input Orchestration):
 
     START
       |
       v
-    [orchestrate]  -- Classifies intent, extracts constraints
+    [input_orchestrate]  -- Classifies route (movies/rag/hybrid), extracts constraints
       |
-      v
-    [respond]      -- Routes to appropriate responder
+      v (conditional)
+      ├── clarification → END (response already set)
+      ├── movies → [respond]
+      ├── rag → [respond]
+      └── hybrid → [respond]
       |
       v
     END
@@ -31,6 +34,7 @@ from typing import Callable
 from langgraph.graph import END, START, StateGraph
 
 from app.agents import MoviesResponder, OrchestratorAgent, SystemResponder
+from app.llm.input_agent import InputOrchestratorAgent
 from app.llm.state import MovieNightState
 from app.schemas.orchestrator import Constraints
 
@@ -41,6 +45,8 @@ def create_orchestrate_node(
     orchestrator: OrchestratorAgent,
 ) -> Callable[[MovieNightState], dict]:
     """Create the orchestrate node that classifies intent and extracts constraints.
+
+    This is the legacy Phase 1 orchestrate node. Kept for backward compatibility.
 
     Args:
         orchestrator: The OrchestratorAgent instance.
@@ -79,6 +85,56 @@ def create_orchestrate_node(
     return orchestrate
 
 
+def create_input_orchestrate_node(
+    input_agent: InputOrchestratorAgent,
+) -> Callable[[MovieNightState], dict]:
+    """Create the input orchestrate node for Phase 2 routing.
+
+    This node uses the InputOrchestratorAgent to classify routes as
+    movies, rag, or hybrid, extract constraints, and generate RAG queries.
+
+    Args:
+        input_agent: The InputOrchestratorAgent instance.
+
+    Returns:
+        A node function that updates state with rich routing information.
+    """
+
+    def input_orchestrate(state: MovieNightState) -> dict:
+        user_message = state["user_message"]
+        logger.info(f"Input orchestrate node processing: {user_message[:50]}...")
+
+        decision = input_agent.decide(user_message)
+
+        logger.debug(
+            f"Input decision: route={decision.route}, "
+            f"needs_clarification={decision.needs_clarification}, "
+            f"needs_recommendation={decision.needs_recommendation}"
+        )
+
+        if decision.needs_clarification:
+            clarification = (
+                decision.clarification_question
+                or "Could you please clarify what you're looking for?"
+            )
+            return {
+                "route": "clarification",
+                "constraints": decision.constraints,
+                "needs_recommendation": False,
+                "rag_query": None,
+                "final_response": clarification,
+            }
+
+        return {
+            "route": decision.route,
+            "constraints": decision.constraints,
+            "needs_recommendation": decision.needs_recommendation,
+            "rag_query": decision.rag_query,
+        }
+
+    return input_orchestrate
+
+
 def create_respond_node(
     movies_responder: MoviesResponder,
     system_responder: SystemResponder,
@@ -105,6 +161,10 @@ def create_respond_node(
         logger.info(f"Respond node processing: route={route}")
 
         if route == "movies":
+            reply = movies_responder.respond(user_message, constraints)
+        elif route == "rag":
+            reply = system_responder.respond(user_message)
+        elif route == "hybrid":
             reply = movies_responder.respond(user_message, constraints)
         else:
             reply = system_responder.respond(user_message)
@@ -136,22 +196,30 @@ class MovieNightWorkflow:
 
     Encapsulates the graph construction and provides a simple interface
     for executing the workflow with a user message.
+
+    Supports two modes:
+    - Legacy mode: Uses OrchestratorAgent (Phase 1)
+    - Input agent mode: Uses InputOrchestratorAgent (Phase 2)
     """
 
     def __init__(
         self,
-        orchestrator: OrchestratorAgent,
+        orchestrator: OrchestratorAgent | None,
         movies_responder: MoviesResponder,
         system_responder: SystemResponder,
+        input_agent: InputOrchestratorAgent | None = None,
     ) -> None:
         """Initialize the workflow with agent instances.
 
         Args:
-            orchestrator: The OrchestratorAgent for intent classification.
+            orchestrator: The OrchestratorAgent for intent classification (legacy).
             movies_responder: The MoviesResponder for movie requests.
             system_responder: The SystemResponder for system questions.
+            input_agent: The InputOrchestratorAgent for Phase 2 routing.
+                        If provided, it takes precedence over orchestrator.
         """
         self._orchestrator = orchestrator
+        self._input_agent = input_agent
         self._movies_responder = movies_responder
         self._system_responder = system_responder
         self._graph = self._build_graph()
@@ -159,12 +227,21 @@ class MovieNightWorkflow:
     def _build_graph(self) -> StateGraph:
         """Build and compile the workflow graph.
 
+        Uses InputOrchestratorAgent if available, otherwise falls back
+        to legacy OrchestratorAgent.
+
         Returns:
             Compiled StateGraph ready for execution.
         """
         builder = StateGraph(MovieNightState)
 
-        orchestrate_node = create_orchestrate_node(self._orchestrator)
+        if self._input_agent is not None:
+            orchestrate_node = create_input_orchestrate_node(self._input_agent)
+        elif self._orchestrator is not None:
+            orchestrate_node = create_orchestrate_node(self._orchestrator)
+        else:
+            raise ValueError("Either orchestrator or input_agent must be provided")
+
         respond_node = create_respond_node(
             self._movies_responder, self._system_responder
         )
@@ -191,6 +268,8 @@ class MovieNightWorkflow:
             "user_message": user_message,
             "route": None,
             "constraints": None,
+            "needs_recommendation": False,
+            "rag_query": None,
             "candidate_movies": [],
             "retrieved_contexts": [],
             "draft_recommendation": None,

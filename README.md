@@ -1,23 +1,39 @@
 # Movie Night Assistant
 
-A simple chat assistant for planning movie nights, powered by Azure OpenAI via LangChain.
+A chat assistant for planning movie nights, powered by Azure OpenAI via LangChain. Features a LangGraph workflow with an Orchestrator Agent that classifies user intent and extracts movie constraints.
 
 ## Architecture
 
 - **Backend**: FastAPI application with `/health` and `/chat` endpoints
 - **Frontend**: Streamlit chat interface
-- **LLM**: Azure OpenAI (GPT model) via LangChain
+- **LLM**: Azure OpenAI via LangChain
+- **Workflow**: LangGraph StateGraph for orchestration
+- **Orchestrator Agent**: Classifies intent (movies vs system) and extracts constraints (genres, runtime)
+- **Responders**: Separate response generators for movie requests and system questions
+
+## How It Works
+
+1. User sends a message to `/chat`
+2. **Orchestrator Agent** analyzes the message:
+   - Classifies intent as "movies" (recommendation request) or "system" (app question)
+   - Extracts constraints: genres (sci-fi, comedy, etc.) and runtime limits
+   - Determines if clarification is needed
+3. Based on the decision, routes to:
+   - **Movies Responder**: Handles movie recommendations
+   - **System Responder**: Answers questions about the app
+4. Returns the response with route and extracted constraints
 
 ## Required Environment Variables
 
 | Variable | Required | Description | Example |
 |----------|----------|-------------|---------|
-| `AZURE_OPENAI_ENDPOINT` | ✅ | Azure OpenAI resource endpoint | `https://myresource.openai.azure.com/` |
 | `AZURE_OPENAI_API_KEY` | ✅ | Azure OpenAI API key | `abc123...` |
-| `AZURE_OPENAI_API_VERSION` | ✅ | API version | `2024-02-15-preview` |
-| `AZURE_OPENAI_DEPLOYMENT` | ✅ | Deployment name (not model name) | `gpt-4o-deployment` |
+| `AZURE_OPENAI_ENDPOINT` | ✅ | Azure OpenAI resource endpoint | `https://your-resource.openai.azure.com/` |
+| `AZURE_OPENAI_DEPLOYMENT` | ✅ | Deployment name of the chat model | `gpt-4o` |
+| `AZURE_OPENAI_API_VERSION` | ❌ | API version (default: 2024-08-01-preview) | `2024-08-01-preview` |
 | `TEMPERATURE` | ❌ | Model temperature (default: 0.7) | `0.7` |
 | `MAX_TOKENS` | ❌ | Max response tokens | `1000` |
+| `LOG_LEVEL` | ❌ | Logging level (default: INFO) | `DEBUG` |
 
 ## Setup Environment Variables
 
@@ -55,6 +71,9 @@ The API will be available at http://localhost:8000
 ```bash
 cd api
 uv run pytest
+
+# On Windows with Git Bash, use:
+uv run python -m pytest
 ```
 
 ### Frontend (UI)
@@ -79,7 +98,7 @@ The UI will be available at http://localhost:8501
 ```bash
 # First time: copy and edit .env file
 cp .env.example .env
-# Edit .env with your actual Azure OpenAI credentials
+# Edit .env with your Azure OpenAI credentials
 ```
 
 Then run:
@@ -106,23 +125,50 @@ Response:
 
 ### Chat
 
+**Movie recommendation request:**
 ```bash
 curl -X POST http://localhost:8000/chat \
   -H "Content-Type: application/json" \
-  -d '{"message": "What are some good comedy movies?"}'
+  -d '{"message": "Recommend a sci-fi movie under 2 hours"}'
 ```
 
 Response:
 ```json
 {
-  "reply": "Great choice! Here are some classic comedies you might enjoy..."
+  "reply": "I see you're looking for a sci-fi movie under 2 hours...",
+  "route": "movies",
+  "extracted_constraints": {
+    "genres": ["sci-fi"],
+    "max_runtime_minutes": 120,
+    "min_runtime_minutes": null
+  }
+}
+```
+
+**System question:**
+```bash
+curl -X POST http://localhost:8000/chat \
+  -H "Content-Type: application/json" \
+  -d '{"message": "How does this app work?"}'
+```
+
+Response:
+```json
+{
+  "reply": "This app uses Azure OpenAI to help you find movies...",
+  "route": "system",
+  "extracted_constraints": {
+    "genres": [],
+    "max_runtime_minutes": null,
+    "min_runtime_minutes": null
+  }
 }
 ```
 
 ### Error Responses
 
 - **422**: Invalid input (missing or empty message)
-- **500**: Server error (LLM call failed)
+- **500**: Server error (LLM call failed or agents not initialized)
 
 ## Project Structure
 
@@ -131,13 +177,27 @@ Response:
 ├── api/
 │   ├── app/
 │   │   ├── __init__.py
-│   │   ├── main.py           # FastAPI app with /health and /chat
-│   │   ├── schemas.py        # Pydantic request/response models
-│   │   ├── settings.py       # Environment configuration
-│   │   └── llm/
+│   │   ├── main.py              # FastAPI app setup and lifespan
+│   │   ├── settings.py          # Environment configuration
+│   │   ├── agents/
+│   │   │   ├── __init__.py
+│   │   │   ├── orchestrator.py  # Intent classification and constraint extraction
+│   │   │   └── responder.py     # Movies and System responders
+│   │   ├── api/
+│   │   │   ├── __init__.py
+│   │   │   └── routes.py        # /health and /chat endpoints
+│   │   ├── llm/
+│   │   │   ├── __init__.py
+│   │   │   ├── client.py         # Azure OpenAI model factory
+│   │   │   ├── model_provider.py # ModelProvider class
+│   │   │   ├── prompts.py        # System prompts for all agents
+│   │   │   ├── state.py          # MovieNightState and workflow constants
+│   │   │   └── workflow.py       # LangGraph workflow skeleton
+│   │   └── schemas/
 │   │       ├── __init__.py
-│   │       ├── agent.py      # LLM wrapper
-│   │       └── prompt.py     # System prompt
+│   │       ├── chat.py           # API request/response models
+│   │       ├── domain.py         # Domain models (MovieResult, etc.)
+│   │       └── orchestrator.py   # Orchestrator decision models
 │   ├── test/
 │   │   ├── conftest.py
 │   │   └── test_main.py
@@ -145,9 +205,16 @@ Response:
 │   └── pyproject.toml
 ├── ui/
 │   ├── app/
-│   │   └── streamlit_app.py  # Chat interface
+│   │   └── streamlit_app.py     # Chat interface with debug info toggle
 │   ├── Dockerfile
 │   └── pyproject.toml
 ├── docker-compose.yml
 └── README.md
 ```
+
+## Current Limitations
+
+- **No external movie database**: Currently LLM-only, TMDB integration planned for later
+- **Stateless**: No memory between messages
+- **No RAG**: No retrieval-augmented generation
+- **No external tools**: No MCP or API integrations yet

@@ -5,18 +5,25 @@ from unittest.mock import MagicMock
 import pytest
 
 from app.agents import MoviesResponder, OrchestratorAgent, SystemResponder
+from app.llm.input_agent import InputOrchestratorAgent
 from app.llm.workflow import (
     MovieNightWorkflow,
+    create_input_orchestrate_node,
     create_orchestrate_node,
     create_respond_node,
     should_respond,
 )
-from app.schemas.orchestrator import Constraints, OrchestratorDecision
+from app.schemas.orchestrator import Constraints, InputDecision, OrchestratorDecision
 
 
 @pytest.fixture
 def mock_orchestrator():
     return MagicMock(spec=OrchestratorAgent)
+
+
+@pytest.fixture
+def mock_input_agent():
+    return MagicMock(spec=InputOrchestratorAgent)
 
 
 @pytest.fixture
@@ -131,12 +138,105 @@ class TestRespondNode:
         mock_system_responder.respond.assert_not_called()
 
 
+class TestInputOrchestrateNode:
+    def test_input_orchestrate_routes_to_movies(self, mock_input_agent):
+        mock_input_agent.decide.return_value = InputDecision(
+            route="movies",
+            constraints=Constraints(genres=["comedy"]),
+            needs_clarification=False,
+            needs_recommendation=True,
+            rag_query=None,
+        )
+
+        node = create_input_orchestrate_node(mock_input_agent)
+        result = node({"user_message": "Recommend a comedy"})
+
+        assert result["route"] == "movies"
+        assert result["constraints"].genres == ["comedy"]
+        assert result["needs_recommendation"] is True
+        assert result["rag_query"] is None
+        assert "final_response" not in result
+        mock_input_agent.decide.assert_called_once_with("Recommend a comedy")
+
+    def test_input_orchestrate_routes_to_rag(self, mock_input_agent):
+        mock_input_agent.decide.return_value = InputDecision(
+            route="rag",
+            constraints=Constraints(),
+            needs_clarification=False,
+            needs_recommendation=False,
+            rag_query="How does this app work?",
+        )
+
+        node = create_input_orchestrate_node(mock_input_agent)
+        result = node({"user_message": "How does this work?"})
+
+        assert result["route"] == "rag"
+        assert result["needs_recommendation"] is False
+        assert result["rag_query"] == "How does this app work?"
+
+    def test_input_orchestrate_routes_to_hybrid(self, mock_input_agent):
+        mock_input_agent.decide.return_value = InputDecision(
+            route="hybrid",
+            constraints=Constraints(genres=["horror"]),
+            needs_clarification=False,
+            needs_recommendation=True,
+            rag_query="History of Halloween horror movies",
+        )
+
+        node = create_input_orchestrate_node(mock_input_agent)
+        result = node({"user_message": "Horror movies for Halloween and their history"})
+
+        assert result["route"] == "hybrid"
+        assert result["constraints"].genres == ["horror"]
+        assert result["needs_recommendation"] is True
+        assert result["rag_query"] == "History of Halloween horror movies"
+
+    def test_input_orchestrate_handles_clarification(self, mock_input_agent):
+        mock_input_agent.decide.return_value = InputDecision(
+            route="movies",
+            constraints=Constraints(),
+            needs_clarification=True,
+            clarification_question="What genre do you prefer?",
+            needs_recommendation=False,
+            rag_query=None,
+        )
+
+        node = create_input_orchestrate_node(mock_input_agent)
+        result = node({"user_message": "help"})
+
+        assert result["route"] == "clarification"
+        assert result["final_response"] == "What genre do you prefer?"
+        assert result["needs_recommendation"] is False
+
+    def test_input_orchestrate_default_clarification_message(self, mock_input_agent):
+        mock_input_agent.decide.return_value = InputDecision(
+            route="movies",
+            constraints=Constraints(),
+            needs_clarification=True,
+            clarification_question=None,
+            needs_recommendation=False,
+            rag_query=None,
+        )
+
+        node = create_input_orchestrate_node(mock_input_agent)
+        result = node({"user_message": "?"})
+
+        assert result["route"] == "clarification"
+        assert "clarify" in result["final_response"].lower()
+
+
 class TestShouldRespond:
     def test_should_respond_movies(self):
         assert should_respond({"route": "movies"}) == "respond"
 
     def test_should_respond_system(self):
         assert should_respond({"route": "system"}) == "respond"
+
+    def test_should_respond_rag(self):
+        assert should_respond({"route": "rag"}) == "respond"
+
+    def test_should_respond_hybrid(self):
+        assert should_respond({"route": "hybrid"}) == "respond"
 
     def test_should_not_respond_clarification(self):
         from langgraph.graph import END
@@ -237,3 +337,142 @@ class TestMovieNightWorkflow:
 
         with pytest.raises(RuntimeError, match="did not produce a response"):
             workflow.get_response("Test")
+
+
+class TestMovieNightWorkflowWithInputAgent:
+    def test_workflow_movies_with_input_agent(
+        self, mock_input_agent, mock_movies_responder, mock_system_responder
+    ):
+        mock_input_agent.decide.return_value = InputDecision(
+            route="movies",
+            constraints=Constraints(genres=["action"]),
+            needs_clarification=False,
+            needs_recommendation=True,
+            rag_query=None,
+        )
+        mock_movies_responder.respond.return_value = "Check out these action movies!"
+
+        workflow = MovieNightWorkflow(
+            orchestrator=None,
+            movies_responder=mock_movies_responder,
+            system_responder=mock_system_responder,
+            input_agent=mock_input_agent,
+        )
+        result = workflow.invoke("Recommend action movies")
+
+        assert result["route"] == "movies"
+        assert result["final_response"] == "Check out these action movies!"
+        assert result["constraints"].genres == ["action"]
+        assert result["needs_recommendation"] is True
+
+    def test_workflow_rag_with_input_agent(
+        self, mock_input_agent, mock_movies_responder, mock_system_responder
+    ):
+        mock_input_agent.decide.return_value = InputDecision(
+            route="rag",
+            constraints=Constraints(),
+            needs_clarification=False,
+            needs_recommendation=False,
+            rag_query="How does the app work?",
+        )
+        mock_system_responder.respond.return_value = "This app helps you find movies."
+
+        workflow = MovieNightWorkflow(
+            orchestrator=None,
+            movies_responder=mock_movies_responder,
+            system_responder=mock_system_responder,
+            input_agent=mock_input_agent,
+        )
+        result = workflow.invoke("How do you work?")
+
+        assert result["route"] == "rag"
+        assert result["final_response"] == "This app helps you find movies."
+        assert result["needs_recommendation"] is False
+        assert result["rag_query"] == "How does the app work?"
+
+    def test_workflow_hybrid_with_input_agent(
+        self, mock_input_agent, mock_movies_responder, mock_system_responder
+    ):
+        mock_input_agent.decide.return_value = InputDecision(
+            route="hybrid",
+            constraints=Constraints(genres=["horror"]),
+            needs_clarification=False,
+            needs_recommendation=True,
+            rag_query="History of Halloween horror films",
+        )
+        mock_movies_responder.respond.return_value = "Here are horror movies for Halloween!"
+
+        workflow = MovieNightWorkflow(
+            orchestrator=None,
+            movies_responder=mock_movies_responder,
+            system_responder=mock_system_responder,
+            input_agent=mock_input_agent,
+        )
+        result = workflow.invoke("Horror movies for Halloween and their history")
+
+        assert result["route"] == "hybrid"
+        assert result["final_response"] == "Here are horror movies for Halloween!"
+        assert result["constraints"].genres == ["horror"]
+        assert result["needs_recommendation"] is True
+        assert result["rag_query"] == "History of Halloween horror films"
+
+    def test_workflow_clarification_with_input_agent(
+        self, mock_input_agent, mock_movies_responder, mock_system_responder
+    ):
+        mock_input_agent.decide.return_value = InputDecision(
+            route="movies",
+            constraints=Constraints(),
+            needs_clarification=True,
+            clarification_question="What mood are you in?",
+            needs_recommendation=False,
+            rag_query=None,
+        )
+
+        workflow = MovieNightWorkflow(
+            orchestrator=None,
+            movies_responder=mock_movies_responder,
+            system_responder=mock_system_responder,
+            input_agent=mock_input_agent,
+        )
+        result = workflow.invoke("something")
+
+        assert result["route"] == "clarification"
+        assert result["final_response"] == "What mood are you in?"
+        mock_movies_responder.respond.assert_not_called()
+        mock_system_responder.respond.assert_not_called()
+
+    def test_workflow_requires_orchestrator_or_input_agent(
+        self, mock_movies_responder, mock_system_responder
+    ):
+        with pytest.raises(ValueError, match="Either orchestrator or input_agent"):
+            MovieNightWorkflow(
+                orchestrator=None,
+                movies_responder=mock_movies_responder,
+                system_responder=mock_system_responder,
+                input_agent=None,
+            )
+
+    def test_get_response_with_input_agent(
+        self, mock_input_agent, mock_movies_responder, mock_system_responder
+    ):
+        mock_input_agent.decide.return_value = InputDecision(
+            route="movies",
+            constraints=Constraints(genres=["horror"], max_runtime_minutes=120),
+            needs_clarification=False,
+            needs_recommendation=True,
+            rag_query=None,
+        )
+        mock_movies_responder.respond.return_value = "Try The Conjuring!"
+
+        workflow = MovieNightWorkflow(
+            orchestrator=None,
+            movies_responder=mock_movies_responder,
+            system_responder=mock_system_responder,
+            input_agent=mock_input_agent,
+        )
+        reply, route, constraints = workflow.get_response("Short horror movie")
+
+        assert reply == "Try The Conjuring!"
+        assert route == "movies"
+        assert constraints.genres == ["horror"]
+        assert constraints.max_runtime_minutes == 120

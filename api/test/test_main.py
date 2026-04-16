@@ -54,7 +54,46 @@ def test_chat_movies_route():
         mock_workflow.get_response.assert_called_once_with("Recommend a comedy movie")
 
 
-def test_chat_system_route():
+def test_chat_rag_route():
+    mock_workflow = MagicMock(spec=MovieNightWorkflow)
+    mock_workflow.get_response.return_value = (
+        "This app uses Azure OpenAI to help with movies.",
+        "rag",
+        Constraints(),
+    )
+
+    with patch("app.api.routes.workflow", mock_workflow):
+        client = TestClient(app, raise_server_exceptions=False)
+        r = client.post("/chat", json={"message": "How does this app work?"})
+
+        assert r.status_code == 200
+        data = r.json()
+        assert data["reply"] == "This app uses Azure OpenAI to help with movies."
+        assert data["route"] == "rag"
+        mock_workflow.get_response.assert_called_once_with("How does this app work?")
+
+
+def test_chat_hybrid_route():
+    mock_workflow = MagicMock(spec=MovieNightWorkflow)
+    mock_workflow.get_response.return_value = (
+        "Here are horror movies for Halloween with history!",
+        "hybrid",
+        Constraints(genres=["horror"]),
+    )
+
+    with patch("app.api.routes.workflow", mock_workflow):
+        client = TestClient(app, raise_server_exceptions=False)
+        r = client.post("/chat", json={"message": "Horror movies for Halloween and their history"})
+
+        assert r.status_code == 200
+        data = r.json()
+        assert data["reply"] == "Here are horror movies for Halloween with history!"
+        assert data["route"] == "hybrid"
+        assert data["extracted_constraints"]["genres"] == ["horror"]
+        mock_workflow.get_response.assert_called_once_with("Horror movies for Halloween and their history")
+
+
+def test_chat_system_route_maps_to_rag():
     mock_workflow = MagicMock(spec=MovieNightWorkflow)
     mock_workflow.get_response.return_value = (
         "This app uses Azure OpenAI to help with movies.",
@@ -69,8 +108,7 @@ def test_chat_system_route():
         assert r.status_code == 200
         data = r.json()
         assert data["reply"] == "This app uses Azure OpenAI to help with movies."
-        assert data["route"] == "system"
-        mock_workflow.get_response.assert_called_once_with("How does this app work?")
+        assert data["route"] == "rag"
 
 
 def test_chat_needs_clarification():
@@ -110,3 +148,22 @@ def test_chat_workflow_not_initialized():
 
         assert r.status_code == 500
         assert "not initialized" in r.json()["detail"]
+
+
+def test_chat_constraints_with_runtime():
+    mock_workflow = MagicMock(spec=MovieNightWorkflow)
+    mock_workflow.get_response.return_value = (
+        "Here's a short comedy for you!",
+        "movies",
+        Constraints(genres=["comedy"], max_runtime_minutes=90),
+    )
+
+    with patch("app.api.routes.workflow", mock_workflow):
+        client = TestClient(app, raise_server_exceptions=False)
+        r = client.post("/chat", json={"message": "Short comedy movie please"})
+
+        assert r.status_code == 200
+        data = r.json()
+        assert data["route"] == "movies"
+        assert data["extracted_constraints"]["genres"] == ["comedy"]
+        assert data["extracted_constraints"]["max_runtime_minutes"] == 90

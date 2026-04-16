@@ -22,6 +22,8 @@ MAX_RETRIES: int = 3
 PASS_THRESHOLD: float = 0.7
 MAX_MOVIE_SEARCHES: int = 5
 
+RouteType = Literal["movies", "rag", "hybrid", "clarification"]
+
 
 class MovieNightState(TypedDict, total=False):
     """State object for the Movie Night Assistant workflow.
@@ -33,8 +35,10 @@ class MovieNightState(TypedDict, total=False):
     Attributes:
         messages: Conversation history with automatic message accumulation.
         user_message: The current user message being processed.
-        route: The determined processing route (movies, system, or clarification).
+        route: The determined processing route (movies, rag, hybrid, or clarification).
         constraints: Extracted constraints from the user message.
+        needs_recommendation: Whether a movie recommendation should be generated.
+        rag_query: Query for RAG pipeline when route is rag or hybrid.
         candidate_movies: Movies retrieved from external sources.
         retrieved_contexts: RAG or external context for augmentation.
         draft_recommendation: Current recommendation being evaluated.
@@ -47,8 +51,10 @@ class MovieNightState(TypedDict, total=False):
 
     messages: Annotated[list[BaseMessage], add_messages]
     user_message: str
-    route: Literal["movies", "system", "clarification"] | None
+    route: RouteType | None
     constraints: Constraints | None
+    needs_recommendation: bool
+    rag_query: str | None
     candidate_movies: list[MovieResult]
     retrieved_contexts: list[RetrievedContext]
     draft_recommendation: DraftRecommendation | None
@@ -73,6 +79,8 @@ def create_initial_state(user_message: str) -> MovieNightState:
         user_message=user_message,
         route=None,
         constraints=None,
+        needs_recommendation=False,
+        rag_query=None,
         candidate_movies=[],
         retrieved_contexts=[],
         draft_recommendation=None,

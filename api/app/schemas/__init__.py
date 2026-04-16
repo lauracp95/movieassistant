@@ -6,13 +6,14 @@ from app.schemas.domain import (
     RetrievedContext,
     RouteDecision,
 )
-from app.schemas.orchestrator import Constraints, OrchestratorDecision
+from app.schemas.orchestrator import Constraints, InputDecision, OrchestratorDecision
 
 __all__ = [
     "ChatRequest",
     "ChatResponse",
     "HealthResponse",
     "Constraints",
+    "InputDecision",
     "OrchestratorDecision",
     "MovieResult",
     "DraftRecommendation",

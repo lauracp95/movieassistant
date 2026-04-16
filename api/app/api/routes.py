@@ -64,10 +64,12 @@ def chat(request: ChatRequest) -> ChatResponse:
         reply, route, constraints = workflow.get_response(request.message)
 
         route_value = None
-        if route in ("movies", "system"):
+        if route in ("movies", "rag", "hybrid"):
             route_value = route
         elif route == "clarification":
             route_value = "movies"
+        elif route == "system":
+            route_value = "rag"
 
         logger.info(f"Chat response generated successfully ({len(reply)} chars)")
 

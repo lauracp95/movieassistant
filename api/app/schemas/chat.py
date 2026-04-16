@@ -29,9 +29,9 @@ class ChatResponse(BaseModel):
         ...,
         description="Assistant's response to the user message",
     )
-    route: Literal["movies", "system"] | None = Field(
+    route: Literal["movies", "system", "rag", "hybrid"] | None = Field(
         default=None,
-        description="The detected intent route (movies or system)",
+        description="The detected intent route (movies, rag, hybrid, or system for legacy)",
     )
     extracted_constraints: Constraints | None = Field(
         default=None,

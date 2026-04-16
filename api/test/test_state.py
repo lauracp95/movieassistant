@@ -5,6 +5,7 @@ from app.llm.state import (
     MAX_RETRIES,
     PASS_THRESHOLD,
     MovieNightState,
+    RouteType,
     create_initial_state,
 )
 from app.schemas.orchestrator import Constraints
@@ -33,6 +34,8 @@ class TestCreateInitialState:
         assert state["messages"] == []
         assert state["route"] is None
         assert state["constraints"] is None
+        assert state["needs_recommendation"] is False
+        assert state["rag_query"] is None
         assert state["candidate_movies"] == []
         assert state["retrieved_contexts"] == []
         assert state["draft_recommendation"] is None
@@ -60,11 +63,23 @@ class TestMovieNightState:
         state["route"] = "movies"
         assert state["route"] == "movies"
 
-        state["route"] = "system"
-        assert state["route"] == "system"
+        state["route"] = "rag"
+        assert state["route"] == "rag"
+
+        state["route"] = "hybrid"
+        assert state["route"] == "hybrid"
 
         state["route"] = "clarification"
         assert state["route"] == "clarification"
+
+    def test_state_supports_new_phase2_fields(self):
+        state: MovieNightState = create_initial_state("Test")
+
+        state["needs_recommendation"] = True
+        assert state["needs_recommendation"] is True
+
+        state["rag_query"] = "How does movie classification work?"
+        assert state["rag_query"] == "How does movie classification work?"
 
     def test_state_can_accumulate_rejected_titles(self):
         state: MovieNightState = create_initial_state("Test")
@@ -74,3 +89,21 @@ class TestMovieNightState:
         assert len(state["rejected_titles"]) == 2
         assert "Movie A" in state["rejected_titles"]
         assert "Movie B" in state["rejected_titles"]
+
+
+class TestRouteType:
+    def test_route_type_includes_movies(self):
+        route: RouteType = "movies"
+        assert route == "movies"
+
+    def test_route_type_includes_rag(self):
+        route: RouteType = "rag"
+        assert route == "rag"
+
+    def test_route_type_includes_hybrid(self):
+        route: RouteType = "hybrid"
+        assert route == "hybrid"
+
+    def test_route_type_includes_clarification(self):
+        route: RouteType = "clarification"
+        assert route == "clarification"

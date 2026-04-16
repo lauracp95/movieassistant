@@ -5,9 +5,10 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from pydantic import ValidationError
 
-from app.agents import OrchestratorAgent, MoviesResponder, SystemResponder
-from app.api.routes import router, initialize_workflow, cleanup_workflow
+from app.agents import MoviesResponder, SystemResponder
+from app.api.routes import cleanup_workflow, initialize_workflow, router
 from app.llm import create_chat_model
+from app.llm.input_agent import InputOrchestratorAgent
 from app.llm.workflow import MovieNightWorkflow
 from app.settings import get_settings
 
@@ -25,15 +26,20 @@ async def lifespan(app: FastAPI):
         settings = get_settings()
 
         llm = create_chat_model(settings)
-        orchestrator_llm = create_chat_model(settings, temperature=0.0)
+        input_agent_llm = create_chat_model(settings, temperature=0.0)
 
-        orchestrator = OrchestratorAgent(orchestrator_llm)
+        input_agent = InputOrchestratorAgent(input_agent_llm)
         movies_responder = MoviesResponder(llm)
         system_responder = SystemResponder(llm)
 
-        workflow = MovieNightWorkflow(orchestrator, movies_responder, system_responder)
+        workflow = MovieNightWorkflow(
+            orchestrator=None,
+            movies_responder=movies_responder,
+            system_responder=system_responder,
+            input_agent=input_agent,
+        )
         initialize_workflow(workflow)
-        logger.info("Movie Assistant workflow initialized successfully")
+        logger.info("Movie Assistant workflow initialized successfully with InputOrchestratorAgent")
 
     except ValidationError as e:
         logger.error(f"Configuration error: {e}")
