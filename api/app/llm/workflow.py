@@ -5,7 +5,7 @@ messages through the existing MVP behavior. The workflow wraps the
 current orchestrator/responder flow while establishing the architectural
 backbone for future phases.
 
-Graph Shape (Phase 3 - Movie Finder Integration):
+Graph Shape (Phase 4 - Recommendation Writer Integration):
 
     START
       |
@@ -14,15 +14,19 @@ Graph Shape (Phase 3 - Movie Finder Integration):
       |
       v (conditional)
       ├── clarification → END (response already set)
-      ├── movies → [find_movies] → [respond]
+      ├── movies → [find_movies] → [write_recommendation] → [respond]
       ├── rag → [respond]
-      └── hybrid → [find_movies] → [respond]
+      └── hybrid → [find_movies] → [write_recommendation] → [respond]
       |
       v
     END
 
+The write_recommendation node is inserted only when a
+RecommendationWriterAgent is provided to the workflow. When absent,
+the graph falls back to the Phase 3 behavior of formatting raw
+candidates directly in the respond node.
+
 Future phases will expand this to include:
-- RecommendationWriterAgent node
 - EvaluatorAgent node with retry loops
 - RAGAssistantAgent node
 """
@@ -35,7 +39,12 @@ from langgraph.graph import END, START, StateGraph
 from app.agents import MoviesResponder, OrchestratorAgent, SystemResponder
 from app.llm.input_agent import InputOrchestratorAgent
 from app.llm.movie_finder_agent import MovieFinderAgent
+from app.llm.recommendation_agent import (
+    RecommendationWriterAgent,
+    filter_candidates,
+)
 from app.llm.state import MovieNightState
+from app.schemas.domain import DraftRecommendation
 from app.schemas.orchestrator import Constraints
 
 logger = logging.getLogger(__name__)
@@ -159,6 +168,8 @@ def create_respond_node(
         user_message = state["user_message"]
         constraints = state.get("constraints") or Constraints()
         candidate_movies = state.get("candidate_movies", [])
+        rejected_titles = state.get("rejected_titles", [])
+        draft: DraftRecommendation | None = state.get("draft_recommendation")
 
         if route == "clarification":
             logger.info("Respond node: clarification already set, skipping")
@@ -166,17 +177,25 @@ def create_respond_node(
 
         logger.info(
             f"Respond node processing: route={route}, "
-            f"candidates={len(candidate_movies)}"
+            f"candidates={len(candidate_movies)}, "
+            f"rejected={len(rejected_titles)}, "
+            f"has_draft={draft is not None}"
         )
 
         if route in ("movies", "hybrid"):
-            if candidate_movies:
-                reply = _format_candidate_response(candidate_movies, constraints)
+            if draft is not None:
+                reply = draft.recommendation_text
             else:
-                reply = (
-                    "I couldn't find any movies matching your criteria. "
-                    "Try broadening your search or specifying different preferences."
+                safe_candidates = filter_candidates(
+                    candidate_movies, constraints, rejected_titles
                 )
+                if safe_candidates:
+                    reply = _format_candidate_response(safe_candidates, constraints)
+                else:
+                    reply = (
+                        "I couldn't find any movies matching your criteria. "
+                        "Try broadening your search or specifying different preferences."
+                    )
         elif route == "rag":
             reply = system_responder.respond(user_message)
         else:
@@ -263,6 +282,60 @@ def create_find_movies_node(
     return find_movies
 
 
+def create_write_recommendation_node(
+    writer: RecommendationWriterAgent,
+) -> Callable[[MovieNightState], dict]:
+    """Create the write_recommendation node.
+
+    This node separates recommendation composition from candidate retrieval.
+    It consumes ``candidate_movies``, ``constraints``, ``user_message`` and
+    ``rejected_titles`` from state and produces a ``DraftRecommendation``.
+
+    The draft is stored in state under ``draft_recommendation`` and is
+    consumed by the respond node.
+
+    Args:
+        writer: The RecommendationWriterAgent instance.
+
+    Returns:
+        A node function that populates ``draft_recommendation`` in state.
+    """
+
+    def write_recommendation(state: MovieNightState) -> dict:
+        user_message = state.get("user_message", "")
+        constraints = state.get("constraints") or Constraints()
+        candidate_movies = state.get("candidate_movies", [])
+        rejected_titles = state.get("rejected_titles", [])
+
+        logger.info(
+            "Write recommendation node: "
+            f"candidates={len(candidate_movies)}, "
+            f"rejected={len(rejected_titles)}"
+        )
+
+        if not candidate_movies:
+            logger.info("Write recommendation node: no candidates, skipping")
+            return {"draft_recommendation": None}
+
+        draft = writer.write(
+            user_message=user_message,
+            constraints=constraints,
+            candidates=candidate_movies,
+            rejected_titles=rejected_titles,
+        )
+
+        if draft is None:
+            logger.info("Write recommendation node: writer returned None")
+            return {"draft_recommendation": None}
+
+        logger.info(
+            f"Write recommendation node: drafted movie='{draft.movie.title}'"
+        )
+        return {"draft_recommendation": draft}
+
+    return write_recommendation
+
+
 def route_after_orchestrate(state: MovieNightState) -> str:
     """Determine the next node after orchestration.
 
@@ -325,6 +398,7 @@ class MovieNightWorkflow:
         system_responder: SystemResponder,
         input_agent: InputOrchestratorAgent | None = None,
         movie_finder: MovieFinderAgent | None = None,
+        recommendation_writer: RecommendationWriterAgent | None = None,
     ) -> None:
         """Initialize the workflow with agent instances.
 
@@ -336,12 +410,16 @@ class MovieNightWorkflow:
                         If provided, it takes precedence over orchestrator.
             movie_finder: The MovieFinderAgent for Phase 3 candidate retrieval.
                          If not provided, skips candidate retrieval step.
+            recommendation_writer: The RecommendationWriterAgent for Phase 4
+                composition. If provided, inserts a write_recommendation
+                step between find_movies and respond.
         """
         self._orchestrator = orchestrator
         self._input_agent = input_agent
         self._movies_responder = movies_responder
         self._system_responder = system_responder
         self._movie_finder = movie_finder
+        self._recommendation_writer = recommendation_writer
         self._graph = self._build_graph()
 
     def _build_graph(self) -> StateGraph:
@@ -376,7 +454,17 @@ class MovieNightWorkflow:
 
             builder.add_edge(START, "orchestrate")
             builder.add_conditional_edges("orchestrate", route_after_orchestrate)
-            builder.add_edge("find_movies", "respond")
+
+            if self._recommendation_writer is not None:
+                write_node = create_write_recommendation_node(
+                    self._recommendation_writer
+                )
+                builder.add_node("write_recommendation", write_node)
+                builder.add_edge("find_movies", "write_recommendation")
+                builder.add_edge("write_recommendation", "respond")
+            else:
+                builder.add_edge("find_movies", "respond")
+
             builder.add_edge("respond", END)
         else:
             builder.add_edge(START, "orchestrate")

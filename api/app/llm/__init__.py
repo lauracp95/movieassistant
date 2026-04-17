@@ -8,7 +8,13 @@ from app.llm.prompts import (
     INPUT_ORCHESTRATOR_SYSTEM_PROMPT,
     MOVIES_RESPONDER_SYSTEM_PROMPT,
     ORCHESTRATOR_SYSTEM_PROMPT,
+    RECOMMENDATION_WRITER_SYSTEM_PROMPT,
     SYSTEM_RESPONDER_SYSTEM_PROMPT,
+)
+from app.llm.recommendation_agent import (
+    LLMRecommendationWriterAgent,
+    RecommendationWriterAgent,
+    StubRecommendationWriterAgent,
 )
 from app.llm.state import (
     MAX_MOVIE_SEARCHES,
@@ -24,9 +30,13 @@ __all__ = [
     "MovieFinderAgent",
     "StubMovieFinderAgent",
     "TMDBMovieFinderAgent",
+    "RecommendationWriterAgent",
+    "StubRecommendationWriterAgent",
+    "LLMRecommendationWriterAgent",
     "INPUT_ORCHESTRATOR_SYSTEM_PROMPT",
     "ORCHESTRATOR_SYSTEM_PROMPT",
     "MOVIES_RESPONDER_SYSTEM_PROMPT",
+    "RECOMMENDATION_WRITER_SYSTEM_PROMPT",
     "SYSTEM_RESPONDER_SYSTEM_PROMPT",
     "MovieNightState",
     "RouteType",

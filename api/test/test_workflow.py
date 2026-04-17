@@ -7,16 +7,21 @@ import pytest
 from app.agents import MoviesResponder, OrchestratorAgent, SystemResponder
 from app.llm.input_agent import InputOrchestratorAgent
 from app.llm.movie_finder_agent import MovieFinderAgent, StubMovieFinderAgent
+from app.llm.recommendation_agent import (
+    RecommendationWriterAgent,
+    StubRecommendationWriterAgent,
+)
 from app.llm.workflow import (
     MovieNightWorkflow,
     create_find_movies_node,
     create_input_orchestrate_node,
     create_orchestrate_node,
     create_respond_node,
+    create_write_recommendation_node,
     route_after_orchestrate,
     should_respond,
 )
-from app.schemas.domain import MovieResult
+from app.schemas.domain import DraftRecommendation, MovieResult
 from app.schemas.orchestrator import Constraints, InputDecision, OrchestratorDecision
 
 
@@ -48,6 +53,16 @@ def mock_movie_finder():
 @pytest.fixture
 def stub_movie_finder():
     return StubMovieFinderAgent()
+
+
+@pytest.fixture
+def mock_recommendation_writer():
+    return MagicMock(spec=RecommendationWriterAgent)
+
+
+@pytest.fixture
+def stub_recommendation_writer():
+    return StubRecommendationWriterAgent()
 
 
 class TestOrchestrateNode:
@@ -825,3 +840,436 @@ class TestMovieNightWorkflowWithMovieFinder:
         assert result["route"] == "clarification"
         assert result["final_response"] == "What genre do you prefer?"
         mock_movie_finder.find_movies.assert_not_called()
+
+
+def _candidate(
+    id_: str,
+    title: str,
+    genres: list[str] | None = None,
+    rating: float | None = None,
+    overview: str | None = None,
+    runtime_minutes: int | None = None,
+) -> MovieResult:
+    return MovieResult(
+        id=id_,
+        title=title,
+        genres=genres or [],
+        rating=rating,
+        overview=overview,
+        runtime_minutes=runtime_minutes,
+        source="test",
+    )
+
+
+class TestWriteRecommendationNode:
+    def test_skips_when_no_candidates(self, mock_recommendation_writer):
+        node = create_write_recommendation_node(mock_recommendation_writer)
+
+        result = node({
+            "user_message": "Recommend something",
+            "constraints": Constraints(),
+            "candidate_movies": [],
+            "rejected_titles": [],
+        })
+
+        assert result == {"draft_recommendation": None}
+        mock_recommendation_writer.write.assert_not_called()
+
+    def test_populates_draft_recommendation(self, mock_recommendation_writer):
+        movie = _candidate("1", "The Matrix", genres=["Sci-Fi"], rating=8.7)
+        draft = DraftRecommendation(
+            movie=movie,
+            recommendation_text="Watch The Matrix, it's a classic.",
+            reasoning="matches genres: sci-fi; rating 8.7/10",
+        )
+        mock_recommendation_writer.write.return_value = draft
+
+        node = create_write_recommendation_node(mock_recommendation_writer)
+        result = node({
+            "user_message": "Sci-fi please",
+            "constraints": Constraints(genres=["sci-fi"]),
+            "candidate_movies": [movie],
+            "rejected_titles": [],
+        })
+
+        assert result["draft_recommendation"] is draft
+        mock_recommendation_writer.write.assert_called_once()
+        kwargs = mock_recommendation_writer.write.call_args.kwargs
+        assert kwargs["user_message"] == "Sci-fi please"
+        assert kwargs["constraints"].genres == ["sci-fi"]
+        assert kwargs["candidates"] == [movie]
+        assert kwargs["rejected_titles"] == []
+
+    def test_forwards_rejected_titles(self, mock_recommendation_writer):
+        mock_recommendation_writer.write.return_value = None
+
+        node = create_write_recommendation_node(mock_recommendation_writer)
+        node({
+            "user_message": "Sci-fi please",
+            "constraints": Constraints(),
+            "candidate_movies": [_candidate("1", "Any")],
+            "rejected_titles": ["Bad Movie"],
+        })
+
+        kwargs = mock_recommendation_writer.write.call_args.kwargs
+        assert kwargs["rejected_titles"] == ["Bad Movie"]
+
+    def test_handles_writer_returning_none(self, mock_recommendation_writer):
+        mock_recommendation_writer.write.return_value = None
+
+        node = create_write_recommendation_node(mock_recommendation_writer)
+        result = node({
+            "user_message": "Anything",
+            "constraints": Constraints(),
+            "candidate_movies": [_candidate("1", "Only")],
+            "rejected_titles": ["Only"],
+        })
+
+        assert result == {"draft_recommendation": None}
+
+
+class TestRespondNodeWithDraft:
+    def test_respond_uses_draft_text_when_available(
+        self, mock_movies_responder, mock_system_responder
+    ):
+        candidates = [_candidate("1", "Fallback Title", genres=["Action"])]
+        draft = DraftRecommendation(
+            movie=_candidate(
+                "2",
+                "Selected Movie",
+                genres=["Action"],
+                rating=8.0,
+                overview="A selected story.",
+            ),
+            recommendation_text="Selected Movie is a grounded pick for action fans.",
+            reasoning="matches genres: action",
+        )
+
+        node = create_respond_node(mock_movies_responder, mock_system_responder)
+        result = node({
+            "user_message": "Action movie",
+            "route": "movies",
+            "constraints": Constraints(genres=["action"]),
+            "candidate_movies": candidates,
+            "draft_recommendation": draft,
+        })
+
+        assert result["final_response"] == (
+            "Selected Movie is a grounded pick for action fans."
+        )
+        assert "Fallback Title" not in result["final_response"]
+
+    def test_respond_falls_back_to_candidates_without_draft(
+        self, mock_movies_responder, mock_system_responder
+    ):
+        candidates = [_candidate("1", "Fallback Title", genres=["Action"])]
+
+        node = create_respond_node(mock_movies_responder, mock_system_responder)
+        result = node({
+            "user_message": "Action movie",
+            "route": "movies",
+            "constraints": Constraints(genres=["action"]),
+            "candidate_movies": candidates,
+            "draft_recommendation": None,
+        })
+
+        assert "Fallback Title" in result["final_response"]
+
+    def test_respond_fallback_excludes_rejected_titles(
+        self, mock_movies_responder, mock_system_responder
+    ):
+        candidates = [
+            _candidate("1", "Rejected Pick", genres=["Action"]),
+            _candidate("2", "Safe Pick", genres=["Action"]),
+        ]
+
+        node = create_respond_node(mock_movies_responder, mock_system_responder)
+        result = node({
+            "user_message": "Action movie",
+            "route": "movies",
+            "constraints": Constraints(genres=["action"]),
+            "candidate_movies": candidates,
+            "rejected_titles": ["Rejected Pick"],
+            "draft_recommendation": None,
+        })
+
+        assert "Rejected Pick" not in result["final_response"]
+        assert "Safe Pick" in result["final_response"]
+
+    def test_respond_fallback_excludes_runtime_violations(
+        self, mock_movies_responder, mock_system_responder
+    ):
+        candidates = [
+            _candidate("1", "Too Long", genres=["Action"], runtime_minutes=200),
+            _candidate("2", "Just Right", genres=["Action"], runtime_minutes=90),
+        ]
+
+        node = create_respond_node(mock_movies_responder, mock_system_responder)
+        result = node({
+            "user_message": "Short action movie",
+            "route": "movies",
+            "constraints": Constraints(
+                genres=["action"], max_runtime_minutes=120
+            ),
+            "candidate_movies": candidates,
+            "rejected_titles": [],
+            "draft_recommendation": None,
+        })
+
+        assert "Too Long" not in result["final_response"]
+        assert "Just Right" in result["final_response"]
+
+    def test_respond_fallback_shows_no_match_when_all_rejected(
+        self, mock_movies_responder, mock_system_responder
+    ):
+        candidates = [_candidate("1", "Only", genres=["Action"])]
+
+        node = create_respond_node(mock_movies_responder, mock_system_responder)
+        result = node({
+            "user_message": "Action movie",
+            "route": "movies",
+            "constraints": Constraints(genres=["action"]),
+            "candidate_movies": candidates,
+            "rejected_titles": ["Only"],
+            "draft_recommendation": None,
+        })
+
+        assert "Only" not in result["final_response"]
+        assert "couldn't find" in result["final_response"].lower()
+
+
+class TestMovieNightWorkflowWithRecommendationWriter:
+    def test_movies_path_uses_writer_draft_text(
+        self,
+        mock_input_agent,
+        mock_movies_responder,
+        mock_system_responder,
+        mock_movie_finder,
+        stub_recommendation_writer,
+    ):
+        mock_input_agent.decide.return_value = InputDecision(
+            route="movies",
+            constraints=Constraints(genres=["sci-fi"]),
+            needs_clarification=False,
+            needs_recommendation=True,
+            rag_query=None,
+        )
+        mock_movie_finder.find_movies.return_value = [
+            _candidate(
+                "1",
+                "The Matrix",
+                genres=["Sci-Fi", "Action"],
+                rating=8.7,
+                overview="A hacker uncovers the truth about reality.",
+                runtime_minutes=136,
+            ),
+            _candidate(
+                "2",
+                "Some Drama",
+                genres=["Drama"],
+                rating=6.5,
+                overview="Unrelated.",
+                runtime_minutes=100,
+            ),
+        ]
+
+        workflow = MovieNightWorkflow(
+            orchestrator=None,
+            movies_responder=mock_movies_responder,
+            system_responder=mock_system_responder,
+            input_agent=mock_input_agent,
+            movie_finder=mock_movie_finder,
+            recommendation_writer=stub_recommendation_writer,
+        )
+        result = workflow.invoke("Recommend a sci-fi movie")
+
+        assert result["route"] == "movies"
+        assert result["draft_recommendation"] is not None
+        assert result["draft_recommendation"].movie.title == "The Matrix"
+        assert "The Matrix" in result["final_response"]
+        assert "Some Drama" not in result["final_response"]
+
+    def test_hybrid_path_also_runs_writer(
+        self,
+        mock_input_agent,
+        mock_movies_responder,
+        mock_system_responder,
+        mock_movie_finder,
+        stub_recommendation_writer,
+    ):
+        mock_input_agent.decide.return_value = InputDecision(
+            route="hybrid",
+            constraints=Constraints(genres=["horror"]),
+            needs_clarification=False,
+            needs_recommendation=True,
+            rag_query="History of horror films",
+        )
+        mock_movie_finder.find_movies.return_value = [
+            _candidate(
+                "10",
+                "Get Out",
+                genres=["Horror", "Thriller"],
+                rating=7.7,
+                overview="A visit gone wrong.",
+            ),
+        ]
+
+        workflow = MovieNightWorkflow(
+            orchestrator=None,
+            movies_responder=mock_movies_responder,
+            system_responder=mock_system_responder,
+            input_agent=mock_input_agent,
+            movie_finder=mock_movie_finder,
+            recommendation_writer=stub_recommendation_writer,
+        )
+        result = workflow.invoke("Horror movies and their history")
+
+        assert result["route"] == "hybrid"
+        assert result["draft_recommendation"] is not None
+        assert result["draft_recommendation"].movie.title == "Get Out"
+        assert "Get Out" in result["final_response"]
+
+    def test_writer_skipped_when_no_candidates(
+        self,
+        mock_input_agent,
+        mock_movies_responder,
+        mock_system_responder,
+        mock_movie_finder,
+        stub_recommendation_writer,
+    ):
+        mock_input_agent.decide.return_value = InputDecision(
+            route="movies",
+            constraints=Constraints(genres=["nonexistent"]),
+            needs_clarification=False,
+            needs_recommendation=True,
+            rag_query=None,
+        )
+        mock_movie_finder.find_movies.return_value = []
+
+        workflow = MovieNightWorkflow(
+            orchestrator=None,
+            movies_responder=mock_movies_responder,
+            system_responder=mock_system_responder,
+            input_agent=mock_input_agent,
+            movie_finder=mock_movie_finder,
+            recommendation_writer=stub_recommendation_writer,
+        )
+        result = workflow.invoke("Recommend nonexistent genre movies")
+
+        assert result["route"] == "movies"
+        assert result["candidate_movies"] == []
+        assert result["draft_recommendation"] is None
+        assert "couldn't find" in result["final_response"].lower()
+
+    def test_rejected_titles_are_respected_by_writer(
+        self,
+        mock_input_agent,
+        mock_movies_responder,
+        mock_system_responder,
+        mock_movie_finder,
+        stub_recommendation_writer,
+    ):
+        mock_input_agent.decide.return_value = InputDecision(
+            route="movies",
+            constraints=Constraints(genres=["sci-fi"]),
+            needs_clarification=False,
+            needs_recommendation=True,
+            rag_query=None,
+        )
+        mock_movie_finder.find_movies.return_value = [
+            _candidate("1", "The Matrix", genres=["sci-fi"], rating=8.7),
+            _candidate("2", "Inception", genres=["sci-fi"], rating=8.8),
+        ]
+
+        workflow = MovieNightWorkflow(
+            orchestrator=None,
+            movies_responder=mock_movies_responder,
+            system_responder=mock_system_responder,
+            input_agent=mock_input_agent,
+            movie_finder=mock_movie_finder,
+            recommendation_writer=stub_recommendation_writer,
+        )
+
+        initial_state = {
+            "user_message": "Recommend a sci-fi movie",
+            "route": None,
+            "constraints": None,
+            "needs_recommendation": False,
+            "rag_query": None,
+            "candidate_movies": [],
+            "retrieved_contexts": [],
+            "draft_recommendation": None,
+            "evaluation_result": None,
+            "retry_count": 0,
+            "rejected_titles": ["Inception"],
+            "final_response": None,
+            "error": None,
+        }
+        result = workflow._graph.invoke(initial_state)
+
+        assert result["draft_recommendation"] is not None
+        assert result["draft_recommendation"].movie.title == "The Matrix"
+        assert "Inception" not in result["final_response"]
+
+    def test_rag_route_skips_writer(
+        self,
+        mock_input_agent,
+        mock_movies_responder,
+        mock_system_responder,
+        mock_movie_finder,
+        mock_recommendation_writer,
+    ):
+        mock_input_agent.decide.return_value = InputDecision(
+            route="rag",
+            constraints=Constraints(),
+            needs_clarification=False,
+            needs_recommendation=False,
+            rag_query="How does this work?",
+        )
+        mock_system_responder.respond.return_value = "This app helps you find movies."
+
+        workflow = MovieNightWorkflow(
+            orchestrator=None,
+            movies_responder=mock_movies_responder,
+            system_responder=mock_system_responder,
+            input_agent=mock_input_agent,
+            movie_finder=mock_movie_finder,
+            recommendation_writer=mock_recommendation_writer,
+        )
+        result = workflow.invoke("How does this work?")
+
+        assert result["final_response"] == "This app helps you find movies."
+        mock_recommendation_writer.write.assert_not_called()
+        mock_movie_finder.find_movies.assert_not_called()
+
+    def test_get_response_returns_grounded_text(
+        self,
+        mock_input_agent,
+        mock_movies_responder,
+        mock_system_responder,
+        stub_movie_finder,
+        stub_recommendation_writer,
+    ):
+        mock_input_agent.decide.return_value = InputDecision(
+            route="movies",
+            constraints=Constraints(genres=["comedy"]),
+            needs_clarification=False,
+            needs_recommendation=True,
+            rag_query=None,
+        )
+
+        workflow = MovieNightWorkflow(
+            orchestrator=None,
+            movies_responder=mock_movies_responder,
+            system_responder=mock_system_responder,
+            input_agent=mock_input_agent,
+            movie_finder=stub_movie_finder,
+            recommendation_writer=stub_recommendation_writer,
+        )
+
+        reply, route, constraints = workflow.get_response("Recommend a comedy")
+
+        assert route == "movies"
+        assert constraints.genres == ["comedy"]
+        assert reply
+        assert reply.strip() != ""
