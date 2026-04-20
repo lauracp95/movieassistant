@@ -1,28 +1,34 @@
 # Movie Night Assistant
 
-A chat assistant for planning movie nights, powered by Azure OpenAI via LangChain. Features a LangGraph workflow with an Orchestrator Agent that classifies user intent and extracts movie constraints, plus TMDB integration for real movie data.
+A chat assistant for planning movie nights, powered by Azure OpenAI via LangChain. It runs a LangGraph workflow: an input orchestrator classifies the request, a movie finder pulls candidates from TMDB (or a stub), a recommendation writer drafts grounded text, and an evaluator can reject drafts and drive retries while tracking rejected titles.
 
 ## Architecture
 
 - **Backend**: FastAPI application with `/health` and `/chat` endpoints
 - **Frontend**: Streamlit chat interface
-- **LLM**: Azure OpenAI via LangChain
-- **Workflow**: LangGraph StateGraph for orchestration
-- **Orchestrator Agent**: Classifies intent (movies vs system) and extracts constraints (genres, runtime)
+- **LLM**: Azure OpenAI via LangChain (separate model instances for routing, writing, and evaluation)
+- **Workflow**: LangGraph `StateGraph` (`MovieNightWorkflow`) coordinating nodes and conditional edges
+- **Input Orchestrator Agent**: Routes to `movies`, `rag`, or `hybrid`; extracts constraints; may ask for clarification
 - **Movie Finder Agent**: Retrieves candidate movies from TMDB (or stub data for testing)
-- **Responders**: Separate response generators for movie requests and system questions
+- **Recommendation Writer Agent**: Picks a candidate and produces recommendation prose grounded in movie metadata
+- **Evaluator Agent (Phase 5)**: Scores each draft; on failure the workflow retries (up to `MAX_RETRIES`) and accumulates **rejected titles** so the finder and writer avoid repeating bad picks; exhausted retries yield a safe fallback message
+- **Responders**: Movies and system responders for formatting and non-retrieval paths
 
 ## How It Works
 
 1. User sends a message to `/chat`
-2. **Orchestrator Agent** analyzes the message:
-   - Classifies intent as "movies" (recommendation request) or "system" (app question)
-   - Extracts constraints: genres (sci-fi, comedy, etc.) and runtime limits
-   - Determines if clarification is needed
-3. Based on the decision, routes to:
-   - **Movies Responder**: Handles movie recommendations
-   - **System Responder**: Answers questions about the app
-4. Returns the response with route and extracted constraints
+2. **Input Orchestrator** analyzes the message:
+   - Chooses route: `movies`, `rag`, `hybrid`, or clarification
+   - Extracts constraints (genres, runtime) when relevant
+   - Sets `rag_query` for knowledge-style questions
+3. **Clarification** ends early with a direct reply.
+4. **`rag`** goes straight to **System Responder** (no movie retrieval).
+5. **`movies` / `hybrid`** run **Find movies** → **Write recommendation** → **Evaluate** (when an evaluator is configured):
+   - The finder can exclude titles in `rejected_titles`
+   - If evaluation fails, the draft is cleared, the failed title is added to `rejected_titles`, `retry_count` increments, and the graph loops back to **Write recommendation** while under `MAX_RETRIES`
+   - If retries are exhausted (or there is no viable draft), **Respond** uses a polite fallback instead of a low-quality recommendation
+6. **Respond** returns final text (draft text when evaluation passed, or formatted candidates / system answer as appropriate)
+7. The API returns the reply plus route and extracted constraints
 
 ## Required Environment Variables
 
@@ -31,7 +37,7 @@ A chat assistant for planning movie nights, powered by Azure OpenAI via LangChai
 | `AZURE_OPENAI_API_KEY` | ✅ | Azure OpenAI API key | `abc123...` |
 | `AZURE_OPENAI_ENDPOINT` | ✅ | Azure OpenAI resource endpoint | `https://your-resource.openai.azure.com/` |
 | `AZURE_OPENAI_DEPLOYMENT` | ✅ | Deployment name of the chat model | `gpt-4o` |
-| `AZURE_OPENAI_API_VERSION` | ❌ | API version (default: 2024-08-01-preview) | `2024-08-01-preview` |
+| `AZURE_OPENAI_API_VERSION` | ✅ | Azure OpenAI API version | `2024-08-01-preview` |
 | `TEMPERATURE` | ❌ | Model temperature (default: 0.7) | `0.7` |
 | `MAX_TOKENS` | ❌ | Max response tokens | `1000` |
 | `LOG_LEVEL` | ❌ | Logging level (default: INFO) | `DEBUG` |
@@ -159,7 +165,7 @@ Response:
 ```json
 {
   "reply": "This app uses Azure OpenAI to help you find movies...",
-  "route": "system",
+  "route": "rag",
   "extracted_constraints": {
     "genres": [],
     "max_runtime_minutes": null,
@@ -168,10 +174,21 @@ Response:
 }
 ```
 
+With the default startup configuration (`InputOrchestratorAgent`), app questions are classified as `rag`.
+
 ### Error Responses
 
 - **422**: Invalid input (missing or empty message)
 - **500**: Server error (LLM call failed or agents not initialized)
+
+## Workflow configuration
+
+Retry and pass rules live in `api/app/llm/state.py`:
+
+- `MAX_RETRIES`: maximum evaluation failures before the safe fallback response
+- `PASS_THRESHOLD`: minimum evaluator score (combined with the evaluator’s `passed` flag) to accept a draft
+
+The production app wires `LLMEvaluatorAgent` in `api/app/main.py` after the recommendation writer. Tests often use `StubEvaluatorAgent` for deterministic behavior.
 
 ## Project Structure
 
@@ -184,7 +201,7 @@ Response:
 │   │   ├── settings.py          # Environment configuration
 │   │   ├── agents/
 │   │   │   ├── __init__.py
-│   │   │   ├── orchestrator.py  # Intent classification and constraint extraction
+│   │   │   ├── orchestrator.py  # Legacy orchestrator (movies vs system)
 │   │   │   └── responder.py     # Movies and System responders
 │   │   ├── api/
 │   │   │   ├── __init__.py
@@ -196,18 +213,29 @@ Response:
 │   │   │   ├── __init__.py
 │   │   │   ├── client.py         # Azure OpenAI model factory
 │   │   │   ├── model_provider.py # ModelProvider class
+│   │   │   ├── evaluator_agent.py # Evaluator (stub + LLM, Phase 5)
+│   │   │   ├── input_agent.py    # Input orchestrator (movies / rag / hybrid)
 │   │   │   ├── movie_finder_agent.py # Movie finder agents (Stub, TMDB)
+│   │   │   ├── recommendation_agent.py # Recommendation writer
 │   │   │   ├── prompts.py        # System prompts for all agents
-│   │   │   ├── state.py          # MovieNightState and workflow constants
-│   │   │   └── workflow.py       # LangGraph workflow skeleton
+│   │   │   ├── state.py          # MovieNightState, MAX_RETRIES, PASS_THRESHOLD
+│   │   │   └── workflow.py     # LangGraph graph, nodes, retry routing
 │   │   └── schemas/
 │   │       ├── __init__.py
 │   │       ├── chat.py           # API request/response models
-│   │       ├── domain.py         # Domain models (MovieResult, etc.)
-│   │       └── orchestrator.py   # Orchestrator decision models
+│   │       ├── domain.py         # Domain models (MovieResult, DraftRecommendation, EvaluationResult, …)
+│   │       └── orchestrator.py   # Orchestrator / input decision models
 │   ├── test/
 │   │   ├── conftest.py
-│   │   └── test_main.py
+│   │   ├── test_evaluator_agent.py
+│   │   ├── test_input_agent.py
+│   │   ├── test_main.py
+│   │   ├── test_movie_finder.py
+│   │   ├── test_recommendation_agent.py
+│   │   ├── test_state.py
+│   │   ├── test_tmdb_client.py
+│   │   ├── test_domain.py
+│   │   └── test_workflow.py      # LangGraph and end-to-end workflow tests
 │   ├── Dockerfile
 │   └── pyproject.toml
 ├── ui/
@@ -222,5 +250,5 @@ Response:
 ## Current Limitations
 
 - **Stateless**: No memory between messages
-- **No RAG**: No retrieval-augmented generation yet
-- **Basic response formatting**: Movie recommendations use simple formatting (RecommendationWriterAgent planned)
+- **RAG route**: The graph can route to `rag` / `hybrid`, but retrieval-augmented answers are not fully implemented; hybrid still combines movie lookup with general system-style responses as configured
+- **Evaluator cost**: Production evaluation adds an extra LLM call per draft attempt (mitigated by deterministic pre-checks for hard constraint violations)
