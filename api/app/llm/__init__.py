@@ -1,10 +1,16 @@
 from app.llm.client import create_chat_model
+from app.llm.evaluator_agent import (
+    EvaluatorAgent,
+    LLMEvaluatorAgent,
+    StubEvaluatorAgent,
+)
 from app.llm.movie_finder_agent import (
     MovieFinderAgent,
     StubMovieFinderAgent,
     TMDBMovieFinderAgent,
 )
 from app.llm.prompts import (
+    EVALUATOR_SYSTEM_PROMPT,
     INPUT_ORCHESTRATOR_SYSTEM_PROMPT,
     MOVIES_RESPONDER_SYSTEM_PROMPT,
     ORCHESTRATOR_SYSTEM_PROMPT,
@@ -33,6 +39,10 @@ __all__ = [
     "RecommendationWriterAgent",
     "StubRecommendationWriterAgent",
     "LLMRecommendationWriterAgent",
+    "EvaluatorAgent",
+    "StubEvaluatorAgent",
+    "LLMEvaluatorAgent",
+    "EVALUATOR_SYSTEM_PROMPT",
     "INPUT_ORCHESTRATOR_SYSTEM_PROMPT",
     "ORCHESTRATOR_SYSTEM_PROMPT",
     "MOVIES_RESPONDER_SYSTEM_PROMPT",

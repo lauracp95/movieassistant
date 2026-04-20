@@ -5,7 +5,7 @@ messages through the existing MVP behavior. The workflow wraps the
 current orchestrator/responder flow while establishing the architectural
 backbone for future phases.
 
-Graph Shape (Phase 4 - Recommendation Writer Integration):
+Graph Shape (Phase 5 - Evaluator + Retry Loop):
 
     START
       |
@@ -14,20 +14,28 @@ Graph Shape (Phase 4 - Recommendation Writer Integration):
       |
       v (conditional)
       ├── clarification → END (response already set)
-      ├── movies → [find_movies] → [write_recommendation] → [respond]
-      ├── rag → [respond]
-      └── hybrid → [find_movies] → [write_recommendation] → [respond]
-      |
-      v
-    END
+      ├── rag → [respond] → END
+      └── movies/hybrid
+               |
+               v
+          [find_movies]
+               |
+               v
+          [write_recommendation]
+               |
+               v
+           [evaluate]
+               |
+               v (conditional)
+               ├── passed → [respond] → END
+               ├── failed AND retry_count < MAX_RETRIES → [write_recommendation] (loop)
+               └── failed AND retries exhausted → [respond] (safe fallback) → END
 
-The write_recommendation node is inserted only when a
-RecommendationWriterAgent is provided to the workflow. When absent,
-the graph falls back to the Phase 3 behavior of formatting raw
-candidates directly in the respond node.
+The evaluate node is inserted only when an EvaluatorAgent is provided.
+When absent, the graph falls back to the Phase 4 behavior (draft text
+used as-is without validation).
 
 Future phases will expand this to include:
-- EvaluatorAgent node with retry loops
 - RAGAssistantAgent node
 """
 
@@ -37,15 +45,22 @@ from typing import Callable
 from langgraph.graph import END, START, StateGraph
 
 from app.agents import MoviesResponder, OrchestratorAgent, SystemResponder
+from app.llm.evaluator_agent import EvaluatorAgent
 from app.llm.input_agent import InputOrchestratorAgent
 from app.llm.movie_finder_agent import MovieFinderAgent
 from app.llm.recommendation_agent import (
     RecommendationWriterAgent,
     filter_candidates,
 )
-from app.llm.state import MovieNightState
-from app.schemas.domain import DraftRecommendation
+from app.llm.state import MAX_RETRIES, PASS_THRESHOLD, MovieNightState
+from app.schemas.domain import DraftRecommendation, EvaluationResult
 from app.schemas.orchestrator import Constraints
+
+RETRY_EXHAUSTED_FALLBACK_MESSAGE = (
+    "I tried a few options but couldn't land on a recommendation that met the "
+    "quality bar for your request. Could you rephrase or loosen your "
+    "preferences a little?"
+)
 
 logger = logging.getLogger(__name__)
 
@@ -170,6 +185,8 @@ def create_respond_node(
         candidate_movies = state.get("candidate_movies", [])
         rejected_titles = state.get("rejected_titles", [])
         draft: DraftRecommendation | None = state.get("draft_recommendation")
+        evaluation_result: EvaluationResult | None = state.get("evaluation_result")
+        retry_count = state.get("retry_count", 0)
 
         if route == "clarification":
             logger.info("Respond node: clarification already set, skipping")
@@ -179,12 +196,23 @@ def create_respond_node(
             f"Respond node processing: route={route}, "
             f"candidates={len(candidate_movies)}, "
             f"rejected={len(rejected_titles)}, "
-            f"has_draft={draft is not None}"
+            f"has_draft={draft is not None}, "
+            f"retry_count={retry_count}, "
+            f"has_evaluation={evaluation_result is not None}"
         )
 
         if route in ("movies", "hybrid"):
             if draft is not None:
                 reply = draft.recommendation_text
+            elif (
+                evaluation_result is not None
+                and retry_count >= MAX_RETRIES
+            ):
+                logger.info(
+                    "Respond node: retries exhausted after evaluation failures; "
+                    "returning safe fallback"
+                )
+                reply = RETRY_EXHAUSTED_FALLBACK_MESSAGE
             else:
                 safe_candidates = filter_candidates(
                     candidate_movies, constraints, rejected_titles
@@ -336,6 +364,129 @@ def create_write_recommendation_node(
     return write_recommendation
 
 
+def create_evaluate_node(
+    evaluator: EvaluatorAgent,
+) -> Callable[[MovieNightState], dict]:
+    """Create the evaluate node that validates draft recommendations.
+
+    On each run, this node asks the :class:`EvaluatorAgent` to score the
+    current ``draft_recommendation``. The evaluator's ``passed`` flag is
+    combined with :data:`PASS_THRESHOLD` to determine whether the draft is
+    accepted. On failure, the node updates state so the workflow can loop
+    back into the writer with a different candidate:
+
+    - ``retry_count`` is incremented
+    - the failed ``draft_recommendation.movie.title`` is appended to
+      ``rejected_titles``
+    - ``draft_recommendation`` is cleared
+
+    If there is no draft to evaluate (e.g. the writer returned ``None``
+    because no candidates survived filtering), the node returns no updates
+    so ``respond`` can handle the empty case.
+
+    Args:
+        evaluator: The :class:`EvaluatorAgent` instance.
+
+    Returns:
+        A node function that updates ``evaluation_result``, and optionally
+        ``retry_count``, ``rejected_titles`` and ``draft_recommendation``.
+    """
+
+    def evaluate(state: MovieNightState) -> dict:
+        draft: DraftRecommendation | None = state.get("draft_recommendation")
+        constraints = state.get("constraints") or Constraints()
+        rejected_titles = list(state.get("rejected_titles", []) or [])
+        retry_count = state.get("retry_count", 0) or 0
+        user_message = state.get("user_message", "")
+
+        if draft is None:
+            logger.info(
+                "Evaluate node: no draft to evaluate; marking retries as "
+                "exhausted so the workflow proceeds to respond"
+            )
+            return {"retry_count": MAX_RETRIES}
+
+        logger.info(
+            f"Evaluate node: judging draft for '{draft.movie.title}' "
+            f"(retry_count={retry_count}, rejected={len(rejected_titles)})"
+        )
+
+        result = evaluator.evaluate(
+            user_message=user_message,
+            constraints=constraints,
+            draft=draft,
+            rejected_titles=rejected_titles,
+        )
+
+        passed = result.passed and result.score >= PASS_THRESHOLD
+
+        updates: dict = {"evaluation_result": result}
+
+        if passed:
+            logger.info(
+                f"Evaluate node: draft for '{draft.movie.title}' PASSED "
+                f"(score={result.score:.2f})"
+            )
+            return updates
+
+        logger.info(
+            f"Evaluate node: draft for '{draft.movie.title}' FAILED "
+            f"(score={result.score:.2f}, passed={result.passed}); "
+            f"incrementing retry_count and appending to rejected_titles"
+        )
+
+        if draft.movie.title not in rejected_titles:
+            rejected_titles.append(draft.movie.title)
+
+        updates["retry_count"] = retry_count + 1
+        updates["rejected_titles"] = rejected_titles
+        updates["draft_recommendation"] = None
+        return updates
+
+    return evaluate
+
+
+def route_after_evaluate(state: MovieNightState) -> str:
+    """Decide what happens after the evaluate node.
+
+    Routes to:
+    - ``respond`` if the draft is still present (it passed evaluation).
+    - ``respond`` if there is no draft and no evaluation result (nothing
+      was evaluated; e.g. no candidates survived filtering).
+    - ``write_recommendation`` to retry if evaluation failed and we still
+      have retries remaining.
+    - ``respond`` otherwise (retries exhausted → safe fallback).
+
+    Args:
+        state: Current workflow state.
+
+    Returns:
+        Next node name.
+    """
+    draft = state.get("draft_recommendation")
+    evaluation_result = state.get("evaluation_result")
+    retry_count = state.get("retry_count", 0) or 0
+
+    if draft is not None:
+        return "respond"
+
+    if evaluation_result is None:
+        return "respond"
+
+    if retry_count < MAX_RETRIES:
+        logger.info(
+            f"Evaluate routing: retry {retry_count}/{MAX_RETRIES}; "
+            "looping back to write_recommendation"
+        )
+        return "write_recommendation"
+
+    logger.info(
+        f"Evaluate routing: retries exhausted at {retry_count}; "
+        "proceeding to respond with safe fallback"
+    )
+    return "respond"
+
+
 def route_after_orchestrate(state: MovieNightState) -> str:
     """Determine the next node after orchestration.
 
@@ -399,6 +550,7 @@ class MovieNightWorkflow:
         input_agent: InputOrchestratorAgent | None = None,
         movie_finder: MovieFinderAgent | None = None,
         recommendation_writer: RecommendationWriterAgent | None = None,
+        evaluator: EvaluatorAgent | None = None,
     ) -> None:
         """Initialize the workflow with agent instances.
 
@@ -413,6 +565,10 @@ class MovieNightWorkflow:
             recommendation_writer: The RecommendationWriterAgent for Phase 4
                 composition. If provided, inserts a write_recommendation
                 step between find_movies and respond.
+            evaluator: The EvaluatorAgent for Phase 5 draft validation.
+                If provided (and a writer is also provided), inserts an
+                evaluate step between write_recommendation and respond
+                with a retry loop back to write_recommendation on failure.
         """
         self._orchestrator = orchestrator
         self._input_agent = input_agent
@@ -420,6 +576,7 @@ class MovieNightWorkflow:
         self._system_responder = system_responder
         self._movie_finder = movie_finder
         self._recommendation_writer = recommendation_writer
+        self._evaluator = evaluator
         self._graph = self._build_graph()
 
     def _build_graph(self) -> StateGraph:
@@ -461,7 +618,21 @@ class MovieNightWorkflow:
                 )
                 builder.add_node("write_recommendation", write_node)
                 builder.add_edge("find_movies", "write_recommendation")
-                builder.add_edge("write_recommendation", "respond")
+
+                if self._evaluator is not None:
+                    evaluate_node = create_evaluate_node(self._evaluator)
+                    builder.add_node("evaluate", evaluate_node)
+                    builder.add_edge("write_recommendation", "evaluate")
+                    builder.add_conditional_edges(
+                        "evaluate",
+                        route_after_evaluate,
+                        {
+                            "respond": "respond",
+                            "write_recommendation": "write_recommendation",
+                        },
+                    )
+                else:
+                    builder.add_edge("write_recommendation", "respond")
             else:
                 builder.add_edge("find_movies", "respond")
 

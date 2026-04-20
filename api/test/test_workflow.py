@@ -5,23 +5,32 @@ from unittest.mock import MagicMock
 import pytest
 
 from app.agents import MoviesResponder, OrchestratorAgent, SystemResponder
+from app.llm.evaluator_agent import EvaluatorAgent, StubEvaluatorAgent
 from app.llm.input_agent import InputOrchestratorAgent
 from app.llm.movie_finder_agent import MovieFinderAgent, StubMovieFinderAgent
 from app.llm.recommendation_agent import (
     RecommendationWriterAgent,
     StubRecommendationWriterAgent,
 )
+from app.llm.state import MAX_RETRIES
 from app.llm.workflow import (
+    RETRY_EXHAUSTED_FALLBACK_MESSAGE,
     MovieNightWorkflow,
+    create_evaluate_node,
     create_find_movies_node,
     create_input_orchestrate_node,
     create_orchestrate_node,
     create_respond_node,
     create_write_recommendation_node,
+    route_after_evaluate,
     route_after_orchestrate,
     should_respond,
 )
-from app.schemas.domain import DraftRecommendation, MovieResult
+from app.schemas.domain import (
+    DraftRecommendation,
+    EvaluationResult,
+    MovieResult,
+)
 from app.schemas.orchestrator import Constraints, InputDecision, OrchestratorDecision
 
 
@@ -63,6 +72,16 @@ def mock_recommendation_writer():
 @pytest.fixture
 def stub_recommendation_writer():
     return StubRecommendationWriterAgent()
+
+
+@pytest.fixture
+def mock_evaluator():
+    return MagicMock(spec=EvaluatorAgent)
+
+
+@pytest.fixture
+def stub_evaluator():
+    return StubEvaluatorAgent()
 
 
 class TestOrchestrateNode:
@@ -1273,3 +1292,595 @@ class TestMovieNightWorkflowWithRecommendationWriter:
         assert constraints.genres == ["comedy"]
         assert reply
         assert reply.strip() != ""
+
+
+class TestEvaluateNode:
+    def test_skips_when_no_draft_and_marks_retries_exhausted(self, mock_evaluator):
+        node = create_evaluate_node(mock_evaluator)
+
+        result = node({
+            "user_message": "anything",
+            "constraints": Constraints(),
+            "draft_recommendation": None,
+            "rejected_titles": [],
+            "retry_count": 0,
+        })
+
+        assert result == {"retry_count": MAX_RETRIES}
+        mock_evaluator.evaluate.assert_not_called()
+
+    def test_passes_draft_when_evaluator_accepts(self, mock_evaluator):
+        movie = _candidate("1", "Great Movie", genres=["Action"])
+        draft = DraftRecommendation(
+            movie=movie, recommendation_text="A good pick."
+        )
+        mock_evaluator.evaluate.return_value = EvaluationResult(
+            passed=True, score=0.9, feedback="ok"
+        )
+
+        node = create_evaluate_node(mock_evaluator)
+        result = node({
+            "user_message": "recommend",
+            "constraints": Constraints(),
+            "draft_recommendation": draft,
+            "rejected_titles": [],
+            "retry_count": 0,
+        })
+
+        assert result["evaluation_result"].passed is True
+        assert "retry_count" not in result
+        assert "rejected_titles" not in result
+        assert "draft_recommendation" not in result
+
+    def test_fails_draft_increments_retry_and_appends_rejected(
+        self, mock_evaluator
+    ):
+        movie = _candidate("1", "Rejected Pick", genres=["Action"])
+        draft = DraftRecommendation(
+            movie=movie, recommendation_text="Some text."
+        )
+        mock_evaluator.evaluate.return_value = EvaluationResult(
+            passed=False, score=0.3, feedback="bad"
+        )
+
+        node = create_evaluate_node(mock_evaluator)
+        result = node({
+            "user_message": "recommend",
+            "constraints": Constraints(),
+            "draft_recommendation": draft,
+            "rejected_titles": ["Old Reject"],
+            "retry_count": 1,
+        })
+
+        assert result["evaluation_result"].passed is False
+        assert result["retry_count"] == 2
+        assert result["rejected_titles"] == ["Old Reject", "Rejected Pick"]
+        assert result["draft_recommendation"] is None
+
+    def test_score_below_threshold_fails_even_if_passed_true(
+        self, mock_evaluator
+    ):
+        movie = _candidate("1", "Weak", genres=["Action"])
+        draft = DraftRecommendation(
+            movie=movie, recommendation_text="Some text."
+        )
+        mock_evaluator.evaluate.return_value = EvaluationResult(
+            passed=True, score=0.5, feedback="weak"
+        )
+
+        node = create_evaluate_node(mock_evaluator)
+        result = node({
+            "user_message": "recommend",
+            "constraints": Constraints(),
+            "draft_recommendation": draft,
+            "rejected_titles": [],
+            "retry_count": 0,
+        })
+
+        assert result["retry_count"] == 1
+        assert result["rejected_titles"] == ["Weak"]
+        assert result["draft_recommendation"] is None
+
+    def test_does_not_duplicate_rejected_title(self, mock_evaluator):
+        movie = _candidate("1", "Already Here", genres=["Action"])
+        draft = DraftRecommendation(
+            movie=movie, recommendation_text="Some text."
+        )
+        mock_evaluator.evaluate.return_value = EvaluationResult(
+            passed=False, score=0.2, feedback="bad"
+        )
+
+        node = create_evaluate_node(mock_evaluator)
+        result = node({
+            "user_message": "recommend",
+            "constraints": Constraints(),
+            "draft_recommendation": draft,
+            "rejected_titles": ["Already Here"],
+            "retry_count": 0,
+        })
+
+        assert result["rejected_titles"] == ["Already Here"]
+
+    def test_forwards_rejected_titles_to_evaluator(self, mock_evaluator):
+        movie = _candidate("1", "Clean", genres=["Action"])
+        draft = DraftRecommendation(
+            movie=movie, recommendation_text="ok"
+        )
+        mock_evaluator.evaluate.return_value = EvaluationResult(
+            passed=True, score=0.9, feedback="ok"
+        )
+
+        node = create_evaluate_node(mock_evaluator)
+        node({
+            "user_message": "request",
+            "constraints": Constraints(genres=["action"]),
+            "draft_recommendation": draft,
+            "rejected_titles": ["Bad One"],
+            "retry_count": 0,
+        })
+
+        kwargs = mock_evaluator.evaluate.call_args.kwargs
+        assert kwargs["user_message"] == "request"
+        assert kwargs["constraints"].genres == ["action"]
+        assert kwargs["draft"] is draft
+        assert kwargs["rejected_titles"] == ["Bad One"]
+
+
+class TestRouteAfterEvaluate:
+    def test_routes_to_respond_when_draft_survives(self):
+        draft = DraftRecommendation(
+            movie=_candidate("1", "Passed", genres=["A"]),
+            recommendation_text="ok",
+        )
+        state = {
+            "draft_recommendation": draft,
+            "evaluation_result": EvaluationResult(
+                passed=True, score=0.9, feedback="ok"
+            ),
+            "retry_count": 0,
+        }
+        assert route_after_evaluate(state) == "respond"
+
+    def test_routes_to_respond_when_no_evaluation_happened(self):
+        state = {
+            "draft_recommendation": None,
+            "evaluation_result": None,
+            "retry_count": 0,
+        }
+        assert route_after_evaluate(state) == "respond"
+
+    def test_routes_to_writer_when_retry_available(self):
+        state = {
+            "draft_recommendation": None,
+            "evaluation_result": EvaluationResult(
+                passed=False, score=0.1, feedback="bad"
+            ),
+            "retry_count": 1,
+        }
+        assert route_after_evaluate(state) == "write_recommendation"
+
+    def test_routes_to_respond_when_retries_exhausted(self):
+        state = {
+            "draft_recommendation": None,
+            "evaluation_result": EvaluationResult(
+                passed=False, score=0.1, feedback="bad"
+            ),
+            "retry_count": MAX_RETRIES,
+        }
+        assert route_after_evaluate(state) == "respond"
+
+
+class TestRespondNodeWithEvaluation:
+    def test_respond_uses_safe_fallback_when_retries_exhausted(
+        self, mock_movies_responder, mock_system_responder
+    ):
+        node = create_respond_node(mock_movies_responder, mock_system_responder)
+        result = node({
+            "user_message": "Recommend something",
+            "route": "movies",
+            "constraints": Constraints(),
+            "candidate_movies": [
+                _candidate("1", "Rejected A"),
+                _candidate("2", "Rejected B"),
+            ],
+            "rejected_titles": ["Rejected A", "Rejected B"],
+            "draft_recommendation": None,
+            "evaluation_result": EvaluationResult(
+                passed=False, score=0.1, feedback="still bad"
+            ),
+            "retry_count": MAX_RETRIES,
+        })
+
+        assert result["final_response"] == RETRY_EXHAUSTED_FALLBACK_MESSAGE
+
+    def test_respond_prefers_draft_over_fallback(
+        self, mock_movies_responder, mock_system_responder
+    ):
+        draft = DraftRecommendation(
+            movie=_candidate("1", "Accepted", genres=["Action"]),
+            recommendation_text="A solid pick for action fans.",
+        )
+        node = create_respond_node(mock_movies_responder, mock_system_responder)
+        result = node({
+            "user_message": "Recommend something",
+            "route": "movies",
+            "constraints": Constraints(),
+            "candidate_movies": [draft.movie],
+            "rejected_titles": [],
+            "draft_recommendation": draft,
+            "evaluation_result": EvaluationResult(
+                passed=True, score=0.9, feedback="ok"
+            ),
+            "retry_count": 0,
+        })
+
+        assert result["final_response"] == "A solid pick for action fans."
+
+    def test_respond_no_candidates_still_uses_no_match_message(
+        self, mock_movies_responder, mock_system_responder
+    ):
+        node = create_respond_node(mock_movies_responder, mock_system_responder)
+        result = node({
+            "user_message": "Recommend something",
+            "route": "movies",
+            "constraints": Constraints(),
+            "candidate_movies": [],
+            "rejected_titles": [],
+            "draft_recommendation": None,
+            "evaluation_result": None,
+            "retry_count": 0,
+        })
+
+        assert "couldn't find" in result["final_response"].lower()
+        assert result["final_response"] != RETRY_EXHAUSTED_FALLBACK_MESSAGE
+
+
+class TestMovieNightWorkflowWithEvaluator:
+    def test_happy_path_passes_on_first_try(
+        self,
+        mock_input_agent,
+        mock_movies_responder,
+        mock_system_responder,
+        mock_movie_finder,
+        stub_recommendation_writer,
+        stub_evaluator,
+    ):
+        mock_input_agent.decide.return_value = InputDecision(
+            route="movies",
+            constraints=Constraints(genres=["sci-fi"]),
+            needs_clarification=False,
+            needs_recommendation=True,
+            rag_query=None,
+        )
+        mock_movie_finder.find_movies.return_value = [
+            _candidate(
+                "1",
+                "The Matrix",
+                genres=["Sci-Fi"],
+                rating=8.7,
+                overview="A hacker uncovers the truth.",
+                runtime_minutes=136,
+            ),
+        ]
+
+        workflow = MovieNightWorkflow(
+            orchestrator=None,
+            movies_responder=mock_movies_responder,
+            system_responder=mock_system_responder,
+            input_agent=mock_input_agent,
+            movie_finder=mock_movie_finder,
+            recommendation_writer=stub_recommendation_writer,
+            evaluator=stub_evaluator,
+        )
+        result = workflow.invoke("Recommend a sci-fi movie")
+
+        assert result["route"] == "movies"
+        assert result["draft_recommendation"] is not None
+        assert result["draft_recommendation"].movie.title == "The Matrix"
+        assert result["evaluation_result"] is not None
+        assert result["evaluation_result"].passed is True
+        assert result["retry_count"] == 0
+        assert result["rejected_titles"] == []
+        assert "The Matrix" in result["final_response"]
+
+    def test_retry_loop_succeeds_after_first_fail(
+        self,
+        mock_input_agent,
+        mock_movies_responder,
+        mock_system_responder,
+        mock_movie_finder,
+        stub_recommendation_writer,
+        mock_evaluator,
+    ):
+        mock_input_agent.decide.return_value = InputDecision(
+            route="movies",
+            constraints=Constraints(genres=["sci-fi"]),
+            needs_clarification=False,
+            needs_recommendation=True,
+            rag_query=None,
+        )
+        mock_movie_finder.find_movies.return_value = [
+            _candidate(
+                "1",
+                "Inception",
+                genres=["Sci-Fi"],
+                rating=8.8,
+                overview="Dream heist.",
+                runtime_minutes=148,
+            ),
+            _candidate(
+                "2",
+                "The Matrix",
+                genres=["Sci-Fi"],
+                rating=8.7,
+                overview="Truth about reality.",
+                runtime_minutes=136,
+            ),
+        ]
+        mock_evaluator.evaluate.side_effect = [
+            EvaluationResult(
+                passed=False, score=0.2, feedback="off-topic"
+            ),
+            EvaluationResult(
+                passed=True, score=0.9, feedback="great"
+            ),
+        ]
+
+        workflow = MovieNightWorkflow(
+            orchestrator=None,
+            movies_responder=mock_movies_responder,
+            system_responder=mock_system_responder,
+            input_agent=mock_input_agent,
+            movie_finder=mock_movie_finder,
+            recommendation_writer=stub_recommendation_writer,
+            evaluator=mock_evaluator,
+        )
+        result = workflow.invoke("Recommend a sci-fi movie")
+
+        assert result["retry_count"] == 1
+        assert "Inception" in result["rejected_titles"]
+        assert result["draft_recommendation"] is not None
+        assert result["draft_recommendation"].movie.title == "The Matrix"
+        assert result["evaluation_result"].passed is True
+        assert "The Matrix" in result["final_response"]
+        assert "Inception" not in result["final_response"]
+        assert mock_evaluator.evaluate.call_count == 2
+
+    def test_retry_loop_stops_at_max_retries_and_returns_fallback(
+        self,
+        mock_input_agent,
+        mock_movies_responder,
+        mock_system_responder,
+        mock_movie_finder,
+        stub_recommendation_writer,
+        mock_evaluator,
+    ):
+        mock_input_agent.decide.return_value = InputDecision(
+            route="movies",
+            constraints=Constraints(genres=["sci-fi"]),
+            needs_clarification=False,
+            needs_recommendation=True,
+            rag_query=None,
+        )
+        mock_movie_finder.find_movies.return_value = [
+            _candidate(
+                f"{i}",
+                f"Movie {i}",
+                genres=["Sci-Fi"],
+                rating=7.0 + i * 0.1,
+                overview=f"Overview {i}.",
+                runtime_minutes=120,
+            )
+            for i in range(1, 6)
+        ]
+        mock_evaluator.evaluate.return_value = EvaluationResult(
+            passed=False, score=0.1, feedback="always bad"
+        )
+
+        workflow = MovieNightWorkflow(
+            orchestrator=None,
+            movies_responder=mock_movies_responder,
+            system_responder=mock_system_responder,
+            input_agent=mock_input_agent,
+            movie_finder=mock_movie_finder,
+            recommendation_writer=stub_recommendation_writer,
+            evaluator=mock_evaluator,
+        )
+        result = workflow.invoke("Recommend a sci-fi movie")
+
+        assert result["retry_count"] == MAX_RETRIES
+        assert len(result["rejected_titles"]) == MAX_RETRIES
+        assert result["draft_recommendation"] is None
+        assert result["final_response"] == RETRY_EXHAUSTED_FALLBACK_MESSAGE
+        assert mock_evaluator.evaluate.call_count == MAX_RETRIES
+
+    def test_retry_loop_stops_when_writer_runs_out_of_candidates(
+        self,
+        mock_input_agent,
+        mock_movies_responder,
+        mock_system_responder,
+        mock_movie_finder,
+        stub_recommendation_writer,
+        mock_evaluator,
+    ):
+        mock_input_agent.decide.return_value = InputDecision(
+            route="movies",
+            constraints=Constraints(genres=["sci-fi"]),
+            needs_clarification=False,
+            needs_recommendation=True,
+            rag_query=None,
+        )
+        mock_movie_finder.find_movies.return_value = [
+            _candidate(
+                "1",
+                "Only Option",
+                genres=["Sci-Fi"],
+                rating=8.0,
+                overview="just this.",
+                runtime_minutes=100,
+            ),
+        ]
+        mock_evaluator.evaluate.return_value = EvaluationResult(
+            passed=False, score=0.1, feedback="bad"
+        )
+
+        workflow = MovieNightWorkflow(
+            orchestrator=None,
+            movies_responder=mock_movies_responder,
+            system_responder=mock_system_responder,
+            input_agent=mock_input_agent,
+            movie_finder=mock_movie_finder,
+            recommendation_writer=stub_recommendation_writer,
+            evaluator=mock_evaluator,
+        )
+        result = workflow.invoke("Recommend a sci-fi movie")
+
+        assert result["rejected_titles"] == ["Only Option"]
+        assert result["draft_recommendation"] is None
+        assert result["final_response"] == RETRY_EXHAUSTED_FALLBACK_MESSAGE
+        assert mock_evaluator.evaluate.call_count == 1
+
+    def test_rag_route_skips_evaluator(
+        self,
+        mock_input_agent,
+        mock_movies_responder,
+        mock_system_responder,
+        mock_movie_finder,
+        stub_recommendation_writer,
+        mock_evaluator,
+    ):
+        mock_input_agent.decide.return_value = InputDecision(
+            route="rag",
+            constraints=Constraints(),
+            needs_clarification=False,
+            needs_recommendation=False,
+            rag_query="how does it work?",
+        )
+        mock_system_responder.respond.return_value = "This app helps you find movies."
+
+        workflow = MovieNightWorkflow(
+            orchestrator=None,
+            movies_responder=mock_movies_responder,
+            system_responder=mock_system_responder,
+            input_agent=mock_input_agent,
+            movie_finder=mock_movie_finder,
+            recommendation_writer=stub_recommendation_writer,
+            evaluator=mock_evaluator,
+        )
+        result = workflow.invoke("how does this work?")
+
+        assert result["final_response"] == "This app helps you find movies."
+        mock_evaluator.evaluate.assert_not_called()
+        mock_movie_finder.find_movies.assert_not_called()
+
+    def test_clarification_skips_evaluator(
+        self,
+        mock_input_agent,
+        mock_movies_responder,
+        mock_system_responder,
+        mock_movie_finder,
+        stub_recommendation_writer,
+        mock_evaluator,
+    ):
+        mock_input_agent.decide.return_value = InputDecision(
+            route="movies",
+            constraints=Constraints(),
+            needs_clarification=True,
+            clarification_question="What genre?",
+            needs_recommendation=False,
+            rag_query=None,
+        )
+
+        workflow = MovieNightWorkflow(
+            orchestrator=None,
+            movies_responder=mock_movies_responder,
+            system_responder=mock_system_responder,
+            input_agent=mock_input_agent,
+            movie_finder=mock_movie_finder,
+            recommendation_writer=stub_recommendation_writer,
+            evaluator=mock_evaluator,
+        )
+        result = workflow.invoke("help")
+
+        assert result["route"] == "clarification"
+        assert result["final_response"] == "What genre?"
+        mock_evaluator.evaluate.assert_not_called()
+
+    def test_no_candidates_skips_evaluator(
+        self,
+        mock_input_agent,
+        mock_movies_responder,
+        mock_system_responder,
+        mock_movie_finder,
+        stub_recommendation_writer,
+        mock_evaluator,
+    ):
+        mock_input_agent.decide.return_value = InputDecision(
+            route="movies",
+            constraints=Constraints(genres=["nonexistent"]),
+            needs_clarification=False,
+            needs_recommendation=True,
+            rag_query=None,
+        )
+        mock_movie_finder.find_movies.return_value = []
+
+        workflow = MovieNightWorkflow(
+            orchestrator=None,
+            movies_responder=mock_movies_responder,
+            system_responder=mock_system_responder,
+            input_agent=mock_input_agent,
+            movie_finder=mock_movie_finder,
+            recommendation_writer=stub_recommendation_writer,
+            evaluator=mock_evaluator,
+        )
+        result = workflow.invoke("Recommend nonexistent genre movies")
+
+        assert result["candidate_movies"] == []
+        assert result["draft_recommendation"] is None
+        mock_evaluator.evaluate.assert_not_called()
+        assert "couldn't find" in result["final_response"].lower()
+
+    def test_get_response_returns_fallback_when_retries_exhausted(
+        self,
+        mock_input_agent,
+        mock_movies_responder,
+        mock_system_responder,
+        mock_movie_finder,
+        stub_recommendation_writer,
+        mock_evaluator,
+    ):
+        mock_input_agent.decide.return_value = InputDecision(
+            route="movies",
+            constraints=Constraints(genres=["sci-fi"]),
+            needs_clarification=False,
+            needs_recommendation=True,
+            rag_query=None,
+        )
+        mock_movie_finder.find_movies.return_value = [
+            _candidate(
+                f"{i}",
+                f"Movie {i}",
+                genres=["Sci-Fi"],
+                rating=7.0,
+                runtime_minutes=100,
+            )
+            for i in range(1, 5)
+        ]
+        mock_evaluator.evaluate.return_value = EvaluationResult(
+            passed=False, score=0.1, feedback="bad"
+        )
+
+        workflow = MovieNightWorkflow(
+            orchestrator=None,
+            movies_responder=mock_movies_responder,
+            system_responder=mock_system_responder,
+            input_agent=mock_input_agent,
+            movie_finder=mock_movie_finder,
+            recommendation_writer=stub_recommendation_writer,
+            evaluator=mock_evaluator,
+        )
+
+        reply, route, constraints = workflow.get_response("sci-fi please")
+
+        assert route == "movies"
+        assert reply == RETRY_EXHAUSTED_FALLBACK_MESSAGE

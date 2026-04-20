@@ -9,6 +9,7 @@ from app.agents import MoviesResponder, SystemResponder
 from app.api.routes import cleanup_workflow, initialize_workflow, router
 from app.integrations.tmdb_client import TMDBClient
 from app.llm import StubMovieFinderAgent, TMDBMovieFinderAgent, create_chat_model
+from app.llm.evaluator_agent import LLMEvaluatorAgent
 from app.llm.input_agent import InputOrchestratorAgent
 from app.llm.movie_finder_agent import MovieFinderAgent
 from app.llm.recommendation_agent import LLMRecommendationWriterAgent
@@ -72,12 +73,14 @@ async def lifespan(app: FastAPI):
         llm = create_chat_model(settings)
         input_agent_llm = create_chat_model(settings, temperature=0.0)
         writer_llm = create_chat_model(settings, temperature=0.3)
+        evaluator_llm = create_chat_model(settings, temperature=0.0)
 
         input_agent = InputOrchestratorAgent(input_agent_llm)
         movies_responder = MoviesResponder(llm)
         system_responder = SystemResponder(llm)
         movie_finder = create_movie_finder(settings)
         recommendation_writer = LLMRecommendationWriterAgent(writer_llm)
+        evaluator = LLMEvaluatorAgent(evaluator_llm)
 
         workflow = MovieNightWorkflow(
             orchestrator=None,
@@ -86,6 +89,7 @@ async def lifespan(app: FastAPI):
             input_agent=input_agent,
             movie_finder=movie_finder,
             recommendation_writer=recommendation_writer,
+            evaluator=evaluator,
         )
         initialize_workflow(workflow)
         logger.info(
