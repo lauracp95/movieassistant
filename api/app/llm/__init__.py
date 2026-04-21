@@ -14,8 +14,14 @@ from app.llm.prompts import (
     INPUT_ORCHESTRATOR_SYSTEM_PROMPT,
     MOVIES_RESPONDER_SYSTEM_PROMPT,
     ORCHESTRATOR_SYSTEM_PROMPT,
+    RAG_ASSISTANT_SYSTEM_PROMPT,
     RECOMMENDATION_WRITER_SYSTEM_PROMPT,
     SYSTEM_RESPONDER_SYSTEM_PROMPT,
+)
+from app.llm.rag_agent import (
+    LLMRAGAssistantAgent,
+    RAGAssistantAgent,
+    StubRAGAssistantAgent,
 )
 from app.llm.recommendation_agent import (
     LLMRecommendationWriterAgent,
@@ -42,10 +48,14 @@ __all__ = [
     "EvaluatorAgent",
     "StubEvaluatorAgent",
     "LLMEvaluatorAgent",
+    "RAGAssistantAgent",
+    "StubRAGAssistantAgent",
+    "LLMRAGAssistantAgent",
     "EVALUATOR_SYSTEM_PROMPT",
     "INPUT_ORCHESTRATOR_SYSTEM_PROMPT",
     "ORCHESTRATOR_SYSTEM_PROMPT",
     "MOVIES_RESPONDER_SYSTEM_PROMPT",
+    "RAG_ASSISTANT_SYSTEM_PROMPT",
     "RECOMMENDATION_WRITER_SYSTEM_PROMPT",
     "SYSTEM_RESPONDER_SYSTEM_PROMPT",
     "MovieNightState",

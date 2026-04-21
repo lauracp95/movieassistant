@@ -11,7 +11,7 @@ A chat assistant for planning movie nights, powered by Azure OpenAI via LangChai
 - **Input Orchestrator Agent**: Routes to `movies`, `rag`, or `hybrid`; extracts constraints; may ask for clarification
 - **Movie Finder Agent**: Retrieves candidate movies from TMDB (or stub data for testing)
 - **Recommendation Writer Agent**: Picks a candidate and produces recommendation prose grounded in movie metadata
-- **Evaluator Agent (Phase 5)**: Scores each draft; on failure the workflow retries (up to `MAX_RETRIES`) and accumulates **rejected titles** so the finder and writer avoid repeating bad picks; exhausted retries yield a safe fallback message
+- **Evaluator Agent**: Scores each draft; on failure the workflow retries (up to `MAX_RETRIES`) and accumulates **rejected titles** so the finder and writer avoid repeating bad picks; exhausted retries yield a safe fallback message
 - **Responders**: Movies and system responders for formatting and non-retrieval paths
 
 ## How It Works
@@ -216,10 +216,16 @@ The production app wires `LLMEvaluatorAgent` in `api/app/main.py` after the reco
 │   │   │   ├── evaluator_agent.py # Evaluator (stub + LLM, Phase 5)
 │   │   │   ├── input_agent.py    # Input orchestrator (movies / rag / hybrid)
 │   │   │   ├── movie_finder_agent.py # Movie finder agents (Stub, TMDB)
+│   │   │   ├── rag_agent.py      # RAG assistant agent (Phase 6)
 │   │   │   ├── recommendation_agent.py # Recommendation writer
 │   │   │   ├── prompts.py        # System prompts for all agents
 │   │   │   ├── state.py          # MovieNightState, MAX_RETRIES, PASS_THRESHOLD
-│   │   │   └── workflow.py     # LangGraph graph, nodes, retry routing
+│   │   │   └── workflow.py       # LangGraph graph, nodes, retry routing
+│   │   ├── rag/
+│   │   │   ├── __init__.py
+│   │   │   ├── ingest.py         # Document ingestion and chunking
+│   │   │   ├── retriever.py      # TF-IDF document retrieval
+│   │   │   └── knowledge_base/   # Markdown docs for RAG
 │   │   └── schemas/
 │   │       ├── __init__.py
 │   │       ├── chat.py           # API request/response models
@@ -231,6 +237,7 @@ The production app wires `LLMEvaluatorAgent` in `api/app/main.py` after the reco
 │   │   ├── test_input_agent.py
 │   │   ├── test_main.py
 │   │   ├── test_movie_finder.py
+│   │   ├── test_rag.py           # RAG retriever, ingester, and agent tests
 │   │   ├── test_recommendation_agent.py
 │   │   ├── test_state.py
 │   │   ├── test_tmdb_client.py
@@ -250,5 +257,5 @@ The production app wires `LLMEvaluatorAgent` in `api/app/main.py` after the reco
 ## Current Limitations
 
 - **Stateless**: No memory between messages
-- **RAG route**: The graph can route to `rag` / `hybrid`, but retrieval-augmented answers are not fully implemented; hybrid still combines movie lookup with general system-style responses as configured
+- **No personalized profiles**: No user profiles or watch history tracking
 - **Evaluator cost**: Production evaluation adds an extra LLM call per draft attempt (mitigated by deterministic pre-checks for hard constraint violations)

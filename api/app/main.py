@@ -12,8 +12,10 @@ from app.llm import StubMovieFinderAgent, TMDBMovieFinderAgent, create_chat_mode
 from app.llm.evaluator_agent import LLMEvaluatorAgent
 from app.llm.input_agent import InputOrchestratorAgent
 from app.llm.movie_finder_agent import MovieFinderAgent
+from app.llm.rag_agent import LLMRAGAssistantAgent
 from app.llm.recommendation_agent import LLMRecommendationWriterAgent
 from app.llm.workflow import MovieNightWorkflow
+from app.rag.retriever import create_retriever
 from app.settings import Settings, get_settings
 
 logging.basicConfig(
@@ -74,6 +76,7 @@ async def lifespan(app: FastAPI):
         input_agent_llm = create_chat_model(settings, temperature=0.0)
         writer_llm = create_chat_model(settings, temperature=0.3)
         evaluator_llm = create_chat_model(settings, temperature=0.0)
+        rag_llm = create_chat_model(settings, temperature=0.3)
 
         input_agent = InputOrchestratorAgent(input_agent_llm)
         movies_responder = MoviesResponder(llm)
@@ -81,6 +84,12 @@ async def lifespan(app: FastAPI):
         movie_finder = create_movie_finder(settings)
         recommendation_writer = LLMRecommendationWriterAgent(writer_llm)
         evaluator = LLMEvaluatorAgent(evaluator_llm)
+
+        rag_retriever = create_retriever()
+        rag_agent = LLMRAGAssistantAgent(rag_llm)
+        logger.info(
+            f"RAG retriever initialized with {len(rag_retriever._documents)} documents"
+        )
 
         workflow = MovieNightWorkflow(
             orchestrator=None,
@@ -90,11 +99,13 @@ async def lifespan(app: FastAPI):
             movie_finder=movie_finder,
             recommendation_writer=recommendation_writer,
             evaluator=evaluator,
+            rag_retriever=rag_retriever,
+            rag_agent=rag_agent,
         )
         initialize_workflow(workflow)
         logger.info(
             f"Movie Assistant workflow initialized successfully "
-            f"(finder: {type(movie_finder).__name__})"
+            f"(finder: {type(movie_finder).__name__}, RAG: enabled)"
         )
 
     except ValidationError as e:

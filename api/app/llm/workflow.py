@@ -5,7 +5,7 @@ messages through the existing MVP behavior. The workflow wraps the
 current orchestrator/responder flow while establishing the architectural
 backbone for future phases.
 
-Graph Shape (Phase 5 - Evaluator + Retry Loop):
+Graph Shape (Phase 6 - RAG Integration):
 
     START
       |
@@ -14,29 +14,17 @@ Graph Shape (Phase 5 - Evaluator + Retry Loop):
       |
       v (conditional)
       ├── clarification → END (response already set)
-      ├── rag → [respond] → END
-      └── movies/hybrid
-               |
-               v
-          [find_movies]
-               |
-               v
-          [write_recommendation]
-               |
-               v
-           [evaluate]
-               |
-               v (conditional)
-               ├── passed → [respond] → END
-               ├── failed AND retry_count < MAX_RETRIES → [write_recommendation] (loop)
-               └── failed AND retries exhausted → [respond] (safe fallback) → END
+      ├── rag → [rag_retrieve] → [rag_respond] → END
+      ├── hybrid → [find_movies] → [rag_retrieve] → [write_recommendation] → [evaluate] → [respond] → END
+      └── movies → [find_movies] → [write_recommendation] → [evaluate] → [respond] → END
 
 The evaluate node is inserted only when an EvaluatorAgent is provided.
 When absent, the graph falls back to the Phase 4 behavior (draft text
 used as-is without validation).
 
-Future phases will expand this to include:
-- RAGAssistantAgent node
+The RAG nodes (rag_retrieve, rag_respond) are inserted when a DocumentRetriever
+and RAGAssistantAgent are provided. For hybrid routes, rag_retrieve runs after
+find_movies to provide context for grounded explanations.
 """
 
 import logging
@@ -48,11 +36,13 @@ from app.agents import MoviesResponder, OrchestratorAgent, SystemResponder
 from app.llm.evaluator_agent import EvaluatorAgent
 from app.llm.input_agent import InputOrchestratorAgent
 from app.llm.movie_finder_agent import MovieFinderAgent
+from app.llm.rag_agent import RAGAssistantAgent
 from app.llm.recommendation_agent import (
     RecommendationWriterAgent,
     filter_candidates,
 )
 from app.llm.state import MAX_RETRIES, PASS_THRESHOLD, MovieNightState
+from app.rag.retriever import DocumentRetriever
 from app.schemas.domain import DraftRecommendation, EvaluationResult
 from app.schemas.orchestrator import Constraints
 
@@ -446,6 +436,75 @@ def create_evaluate_node(
     return evaluate
 
 
+def create_rag_retrieve_node(
+    retriever: DocumentRetriever,
+) -> Callable[[MovieNightState], dict]:
+    """Create the rag_retrieve node that retrieves relevant documents.
+
+    This node uses the DocumentRetriever to search the knowledge base
+    for documents relevant to the user's RAG query. Results are stored
+    in state under ``retrieved_contexts``.
+
+    Args:
+        retriever: The DocumentRetriever instance.
+
+    Returns:
+        A node function that populates ``retrieved_contexts`` in state.
+    """
+
+    def rag_retrieve(state: MovieNightState) -> dict:
+        rag_query = state.get("rag_query")
+        user_message = state.get("user_message", "")
+
+        query = rag_query or user_message
+
+        logger.info(f"RAG retrieve node: query='{query[:50]}...'")
+
+        contexts = retriever.retrieve(query)
+
+        logger.info(f"RAG retrieve node: found {len(contexts)} relevant contexts")
+
+        return {"retrieved_contexts": contexts}
+
+    return rag_retrieve
+
+
+def create_rag_respond_node(
+    rag_agent: RAGAssistantAgent,
+) -> Callable[[MovieNightState], dict]:
+    """Create the rag_respond node that generates RAG-grounded answers.
+
+    This node uses the RAGAssistantAgent to generate an answer based on
+    retrieved contexts. It is used for pure RAG routes (system questions).
+
+    Args:
+        rag_agent: The RAGAssistantAgent instance.
+
+    Returns:
+        A node function that populates ``final_response`` in state.
+    """
+
+    def rag_respond(state: MovieNightState) -> dict:
+        user_message = state.get("user_message", "")
+        rag_query = state.get("rag_query")
+        contexts = state.get("retrieved_contexts", [])
+
+        query = rag_query or user_message
+
+        logger.info(
+            f"RAG respond node: query='{query[:50]}...', "
+            f"contexts={len(contexts)}"
+        )
+
+        answer = rag_agent.answer(query=query, contexts=contexts)
+
+        logger.info(f"RAG respond node: generated answer length={len(answer)}")
+
+        return {"final_response": answer}
+
+    return rag_respond
+
+
 def route_after_evaluate(state: MovieNightState) -> str:
     """Decide what happens after the evaluate node.
 
@@ -488,12 +547,12 @@ def route_after_evaluate(state: MovieNightState) -> str:
 
 
 def route_after_orchestrate(state: MovieNightState) -> str:
-    """Determine the next node after orchestration.
+    """Determine the next node after orchestration (legacy/no-RAG version).
 
     Routes to:
     - END if clarification is needed (response already set)
     - find_movies if route is movies or hybrid (need candidates)
-    - respond if route is rag (no movie retrieval needed)
+    - respond for rag route or fallback
 
     Args:
         state: Current workflow state.
@@ -508,6 +567,36 @@ def route_after_orchestrate(state: MovieNightState) -> str:
 
     if route in ("movies", "hybrid"):
         return "find_movies"
+
+    return "respond"
+
+
+def route_after_orchestrate_with_rag(state: MovieNightState) -> str:
+    """Determine the next node after orchestration (RAG-enabled version).
+
+    Routes to:
+    - END if clarification is needed (response already set)
+    - find_movies if route is movies (need candidates only)
+    - find_movies if route is hybrid (need candidates, then RAG context)
+    - rag_retrieve if route is rag (need RAG context, no movies)
+    - respond as fallback
+
+    Args:
+        state: Current workflow state.
+
+    Returns:
+        Next node name or END.
+    """
+    route = state.get("route")
+
+    if route == "clarification":
+        return END
+
+    if route in ("movies", "hybrid"):
+        return "find_movies"
+
+    if route == "rag":
+        return "rag_retrieve"
 
     return "respond"
 
@@ -540,6 +629,7 @@ class MovieNightWorkflow:
     - Input agent mode: Uses InputOrchestratorAgent (Phase 2/3)
 
     Phase 3 adds MovieFinderAgent for candidate retrieval.
+    Phase 6 adds RAG retrieval and response for system questions.
     """
 
     def __init__(
@@ -551,6 +641,8 @@ class MovieNightWorkflow:
         movie_finder: MovieFinderAgent | None = None,
         recommendation_writer: RecommendationWriterAgent | None = None,
         evaluator: EvaluatorAgent | None = None,
+        rag_retriever: DocumentRetriever | None = None,
+        rag_agent: RAGAssistantAgent | None = None,
     ) -> None:
         """Initialize the workflow with agent instances.
 
@@ -569,6 +661,10 @@ class MovieNightWorkflow:
                 If provided (and a writer is also provided), inserts an
                 evaluate step between write_recommendation and respond
                 with a retry loop back to write_recommendation on failure.
+            rag_retriever: The DocumentRetriever for Phase 6 RAG retrieval.
+                If provided, enables RAG-based responses for system questions.
+            rag_agent: The RAGAssistantAgent for Phase 6 grounded answers.
+                Must be provided with rag_retriever for RAG functionality.
         """
         self._orchestrator = orchestrator
         self._input_agent = input_agent
@@ -577,6 +673,8 @@ class MovieNightWorkflow:
         self._movie_finder = movie_finder
         self._recommendation_writer = recommendation_writer
         self._evaluator = evaluator
+        self._rag_retriever = rag_retriever
+        self._rag_agent = rag_agent
         self._graph = self._build_graph()
 
     def _build_graph(self) -> StateGraph:
@@ -585,6 +683,9 @@ class MovieNightWorkflow:
         Uses InputOrchestratorAgent if available, otherwise falls back
         to legacy OrchestratorAgent. If MovieFinderAgent is provided,
         adds candidate retrieval before response generation.
+
+        Phase 6 adds RAG retrieval and response nodes for system questions
+        and hybrid routes.
 
         Returns:
             Compiled StateGraph ready for execution.
@@ -605,19 +706,58 @@ class MovieNightWorkflow:
         builder.add_node("orchestrate", orchestrate_node)
         builder.add_node("respond", respond_node)
 
+        has_rag = self._rag_retriever is not None and self._rag_agent is not None
+
+        if has_rag:
+            rag_retrieve_node = create_rag_retrieve_node(self._rag_retriever)
+            rag_respond_node = create_rag_respond_node(self._rag_agent)
+            builder.add_node("rag_retrieve", rag_retrieve_node)
+            builder.add_node("rag_respond", rag_respond_node)
+
         if self._movie_finder is not None:
             find_movies_node = create_find_movies_node(self._movie_finder)
             builder.add_node("find_movies", find_movies_node)
 
             builder.add_edge(START, "orchestrate")
-            builder.add_conditional_edges("orchestrate", route_after_orchestrate)
+
+            if has_rag:
+                builder.add_conditional_edges(
+                    "orchestrate",
+                    route_after_orchestrate_with_rag,
+                    {
+                        END: END,
+                        "find_movies": "find_movies",
+                        "rag_retrieve": "rag_retrieve",
+                        "respond": "respond",
+                    },
+                )
+                builder.add_edge("rag_retrieve", "rag_respond")
+                builder.add_edge("rag_respond", END)
+            else:
+                builder.add_conditional_edges("orchestrate", route_after_orchestrate)
 
             if self._recommendation_writer is not None:
                 write_node = create_write_recommendation_node(
                     self._recommendation_writer
                 )
                 builder.add_node("write_recommendation", write_node)
-                builder.add_edge("find_movies", "write_recommendation")
+
+                if has_rag:
+                    builder.add_conditional_edges(
+                        "find_movies",
+                        self._route_after_find_movies,
+                        {
+                            "rag_retrieve_hybrid": "rag_retrieve_hybrid",
+                            "write_recommendation": "write_recommendation",
+                        },
+                    )
+                    rag_retrieve_hybrid_node = create_rag_retrieve_node(
+                        self._rag_retriever
+                    )
+                    builder.add_node("rag_retrieve_hybrid", rag_retrieve_hybrid_node)
+                    builder.add_edge("rag_retrieve_hybrid", "write_recommendation")
+                else:
+                    builder.add_edge("find_movies", "write_recommendation")
 
                 if self._evaluator is not None:
                     evaluate_node = create_evaluate_node(self._evaluator)
@@ -639,10 +779,40 @@ class MovieNightWorkflow:
             builder.add_edge("respond", END)
         else:
             builder.add_edge(START, "orchestrate")
-            builder.add_conditional_edges("orchestrate", should_respond)
+            if has_rag:
+                builder.add_conditional_edges(
+                    "orchestrate",
+                    route_after_orchestrate_with_rag,
+                    {
+                        END: END,
+                        "rag_retrieve": "rag_retrieve",
+                        "respond": "respond",
+                    },
+                )
+                builder.add_edge("rag_retrieve", "rag_respond")
+                builder.add_edge("rag_respond", END)
+            else:
+                builder.add_conditional_edges("orchestrate", should_respond)
             builder.add_edge("respond", END)
 
         return builder.compile()
+
+    def _route_after_find_movies(self, state: MovieNightState) -> str:
+        """Route after find_movies node for hybrid requests.
+
+        For hybrid routes, retrieves RAG context before writing recommendations.
+        For movies routes, goes directly to write_recommendation.
+
+        Args:
+            state: Current workflow state.
+
+        Returns:
+            Next node name.
+        """
+        route = state.get("route")
+        if route == "hybrid":
+            return "rag_retrieve_hybrid"
+        return "write_recommendation"
 
     def invoke(self, user_message: str) -> MovieNightState:
         """Execute the workflow with a user message.
