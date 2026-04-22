@@ -135,16 +135,18 @@ class TestTMDBMovieFinderAgent:
                 source="tmdb",
             ),
         ]
+        mock_tmdb_client.search_keywords.return_value = []
 
         finder = TMDBMovieFinderAgent(mock_tmdb_client)
         results = finder.find_movies(Constraints(genres=["Action"]))
 
-        mock_tmdb_client.discover_movies.assert_called_once()
+        assert mock_tmdb_client.discover_movies.called
         assert len(results) == 1
         assert results[0].title == "Test Movie"
 
     def test_tmdb_finder_passes_constraints(self, mock_tmdb_client):
         mock_tmdb_client.discover_movies.return_value = []
+        mock_tmdb_client.search_keywords.return_value = []
 
         finder = TMDBMovieFinderAgent(mock_tmdb_client)
         finder.find_movies(
@@ -156,12 +158,10 @@ class TestTMDBMovieFinderAgent:
             limit=5,
         )
 
-        mock_tmdb_client.discover_movies.assert_called_once_with(
-            genres=["Horror", "Thriller"],
-            max_runtime=120,
-            min_runtime=90,
-            limit=5,
-        )
+        call_kwargs = mock_tmdb_client.discover_movies.call_args.kwargs
+        assert call_kwargs["genres"] == ["Horror", "Thriller"]
+        assert call_kwargs["max_runtime"] == 120
+        assert call_kwargs["min_runtime"] == 90
 
     def test_tmdb_finder_excludes_titles(self, mock_tmdb_client):
         mock_tmdb_client.discover_movies.return_value = [
@@ -169,6 +169,7 @@ class TestTMDBMovieFinderAgent:
             MovieResult(id="tmdb-2", title="Exclude Me", genres=[], source="tmdb"),
             MovieResult(id="tmdb-3", title="Keep Too", genres=[], source="tmdb"),
         ]
+        mock_tmdb_client.search_keywords.return_value = []
 
         finder = TMDBMovieFinderAgent(mock_tmdb_client)
         results = finder.find_movies(
@@ -187,6 +188,7 @@ class TestTMDBMovieFinderAgent:
             MovieResult(id="tmdb-2", title="Movie 2", genres=[], source="tmdb"),
             MovieResult(id="tmdb-3", title="Movie 3", genres=[], source="tmdb"),
         ]
+        mock_tmdb_client.search_keywords.return_value = []
 
         finder = TMDBMovieFinderAgent(mock_tmdb_client)
         results = finder.find_movies(Constraints(), limit=2)
@@ -195,6 +197,7 @@ class TestTMDBMovieFinderAgent:
 
     def test_tmdb_finder_handles_api_error_gracefully(self, mock_tmdb_client):
         mock_tmdb_client.discover_movies.side_effect = TMDBClientError("API Error")
+        mock_tmdb_client.search_keywords.return_value = []
 
         finder = TMDBMovieFinderAgent(mock_tmdb_client)
         results = finder.find_movies(Constraints())
@@ -203,6 +206,7 @@ class TestTMDBMovieFinderAgent:
 
     def test_tmdb_finder_handles_generic_exception(self, mock_tmdb_client):
         mock_tmdb_client.discover_movies.side_effect = Exception("Unexpected error")
+        mock_tmdb_client.search_keywords.return_value = []
 
         finder = TMDBMovieFinderAgent(mock_tmdb_client)
         results = finder.find_movies(Constraints())

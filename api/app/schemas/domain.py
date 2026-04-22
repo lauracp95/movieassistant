@@ -55,6 +55,14 @@ class MovieResult(BaseModel):
         default="unknown",
         description="Data source identifier (e.g., 'tmdb', 'llm')",
     )
+    cast: list[str] | None = Field(
+        default=None,
+        description="List of main cast member names",
+    )
+    director: str | None = Field(
+        default=None,
+        description="Director name",
+    )
 
 
 class DraftRecommendation(BaseModel):

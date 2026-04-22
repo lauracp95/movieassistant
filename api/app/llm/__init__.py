@@ -44,6 +44,7 @@ from app.llm.state import (
     RouteType,
     create_initial_state,
 )
+from app.schemas.orchestrator import MovieSearchQuery
 
 __all__ = [
     "create_chat_model",
@@ -73,6 +74,7 @@ __all__ = [
     "RECOMMENDATION_WRITER_SYSTEM_PROMPT",
     "SYSTEM_RESPONDER_SYSTEM_PROMPT",
     "MovieNightState",
+    "MovieSearchQuery",
     "RouteType",
     "create_initial_state",
     "MAX_RETRIES",

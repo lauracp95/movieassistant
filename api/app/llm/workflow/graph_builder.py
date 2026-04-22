@@ -266,6 +266,7 @@ class MovieNightWorkflow:
             "user_message": user_message,
             "route": None,
             "constraints": None,
+            "search_query": None,
             "needs_recommendation": False,
             "rag_query": None,
             "candidate_movies": [],

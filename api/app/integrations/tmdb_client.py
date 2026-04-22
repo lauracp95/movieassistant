@@ -126,6 +126,52 @@ class TMDBClient:
             logger.error(f"TMDB request failed: {e}")
             raise TMDBClientError(f"TMDB request failed: {e}") from e
 
+    def search_person(self, name: str) -> int | None:
+        """Search for a person (actor/director) by name and return their TMDB ID.
+
+        Args:
+            name: Person's name to search for.
+
+        Returns:
+            TMDB person ID if found, None otherwise.
+        """
+        params = {
+            "query": name,
+            "include_adult": "false",
+            "language": "en-US",
+            "page": 1,
+        }
+
+        try:
+            data = self._get("/search/person", params)
+            results = data.get("results", [])
+            if results:
+                person = results[0]
+                person_id = person.get("id")
+                logger.debug(f"Resolved '{name}' to person ID: {person_id}")
+                return person_id
+            logger.debug(f"No person found for: {name}")
+            return None
+        except TMDBClientError as e:
+            logger.warning(f"Person search failed for '{name}': {e}")
+            return None
+
+    def search_persons(self, names: list[str]) -> list[int]:
+        """Search for multiple persons and return their TMDB IDs.
+
+        Args:
+            names: List of person names to search for.
+
+        Returns:
+            List of TMDB person IDs for found persons.
+        """
+        ids = []
+        for name in names:
+            person_id = self.search_person(name)
+            if person_id:
+                ids.append(person_id)
+        return ids
+
     def discover_movies(
         self,
         genres: list[str] | None = None,
@@ -133,6 +179,12 @@ class TMDBClient:
         min_runtime: int | None = None,
         min_rating: float | None = None,
         year: int | None = None,
+        year_start: int | None = None,
+        year_end: int | None = None,
+        with_cast: list[int] | None = None,
+        with_crew: list[int] | None = None,
+        with_keywords: list[int] | None = None,
+        with_original_language: str | None = None,
         limit: int = 20,
     ) -> list[MovieResult]:
         """Discover movies using TMDB's discover endpoint.
@@ -142,7 +194,13 @@ class TMDBClient:
             max_runtime: Maximum runtime in minutes.
             min_runtime: Minimum runtime in minutes.
             min_rating: Minimum vote average (0-10).
-            year: Release year filter.
+            year: Exact release year filter.
+            year_start: Start of release year range (inclusive).
+            year_end: End of release year range (inclusive).
+            with_cast: List of person IDs for cast filtering.
+            with_crew: List of person IDs for crew filtering (directors).
+            with_keywords: List of keyword IDs for thematic filtering.
+            with_original_language: ISO 639-1 language code.
             limit: Maximum number of results to return.
 
         Returns:
@@ -172,6 +230,23 @@ class TMDBClient:
 
         if year:
             params["primary_release_year"] = year
+        elif year_start or year_end:
+            if year_start:
+                params["primary_release_date.gte"] = f"{year_start}-01-01"
+            if year_end:
+                params["primary_release_date.lte"] = f"{year_end}-12-31"
+
+        if with_cast:
+            params["with_cast"] = ",".join(str(pid) for pid in with_cast)
+
+        if with_crew:
+            params["with_crew"] = ",".join(str(pid) for pid in with_crew)
+
+        if with_keywords:
+            params["with_keywords"] = "|".join(str(kid) for kid in with_keywords)
+
+        if with_original_language:
+            params["with_original_language"] = with_original_language
 
         logger.debug(f"TMDB discover params: {params}")
         data = self._get("/discover/movie", params)
@@ -183,6 +258,83 @@ class TMDBClient:
                 results.append(movie)
 
         return results
+
+    def search_keyword(self, keyword: str) -> int | None:
+        """Search for a keyword and return its TMDB ID.
+
+        Args:
+            keyword: Keyword to search for.
+
+        Returns:
+            TMDB keyword ID if found, None otherwise.
+        """
+        params = {"query": keyword, "page": 1}
+
+        try:
+            data = self._get("/search/keyword", params)
+            results = data.get("results", [])
+            if results:
+                keyword_id = results[0].get("id")
+                logger.debug(f"Resolved keyword '{keyword}' to ID: {keyword_id}")
+                return keyword_id
+            return None
+        except TMDBClientError as e:
+            logger.warning(f"Keyword search failed for '{keyword}': {e}")
+            return None
+
+    def search_keywords(self, keywords: list[str]) -> list[int]:
+        """Search for multiple keywords and return their TMDB IDs.
+
+        Args:
+            keywords: List of keywords to search for.
+
+        Returns:
+            List of TMDB keyword IDs for found keywords.
+        """
+        ids = []
+        for kw in keywords:
+            keyword_id = self.search_keyword(kw)
+            if keyword_id:
+                ids.append(keyword_id)
+        return ids
+
+    def get_person_movies(
+        self,
+        person_id: int,
+        as_cast: bool = True,
+        limit: int = 20,
+    ) -> list[MovieResult]:
+        """Get movies featuring a specific person.
+
+        Args:
+            person_id: TMDB person ID.
+            as_cast: If True, get movies where person is in cast; otherwise crew.
+            limit: Maximum number of results to return.
+
+        Returns:
+            List of MovieResult objects.
+        """
+        try:
+            data = self._get(f"/person/{person_id}/movie_credits")
+            key = "cast" if as_cast else "crew"
+            credits = data.get(key, [])
+
+            credits_sorted = sorted(
+                credits,
+                key=lambda x: x.get("popularity", 0),
+                reverse=True,
+            )
+
+            results = []
+            for item in credits_sorted[:limit]:
+                movie = self._normalize_movie(item)
+                if movie:
+                    results.append(movie)
+
+            return results
+        except TMDBClientError as e:
+            logger.warning(f"Person movies lookup failed: {e}")
+            return []
 
     def search_movies(self, query: str, limit: int = 20) -> list[MovieResult]:
         """Search for movies by title.

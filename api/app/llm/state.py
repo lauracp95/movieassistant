@@ -16,7 +16,7 @@ from app.schemas.domain import (
     MovieResult,
     RetrievedContext,
 )
-from app.schemas.orchestrator import Constraints
+from app.schemas.orchestrator import Constraints, MovieSearchQuery
 
 MAX_RETRIES: int = 3
 PASS_THRESHOLD: float = 0.7
@@ -36,7 +36,8 @@ class MovieNightState(TypedDict, total=False):
         messages: Conversation history with automatic message accumulation.
         user_message: The current user message being processed.
         route: The determined processing route (movies, rag, hybrid, or clarification).
-        constraints: Extracted constraints from the user message.
+        constraints: Extracted hard constraints from the user message.
+        search_query: Rich search query for improved movie retrieval.
         needs_recommendation: Whether a movie recommendation should be generated.
         rag_query: Query for RAG pipeline when route is rag or hybrid.
         candidate_movies: Movies retrieved from external sources.
@@ -53,6 +54,7 @@ class MovieNightState(TypedDict, total=False):
     user_message: str
     route: RouteType | None
     constraints: Constraints | None
+    search_query: MovieSearchQuery | None
     needs_recommendation: bool
     rag_query: str | None
     candidate_movies: list[MovieResult]
@@ -79,6 +81,7 @@ def create_initial_state(user_message: str) -> MovieNightState:
         user_message=user_message,
         route=None,
         constraints=None,
+        search_query=None,
         needs_recommendation=False,
         rag_query=None,
         candidate_movies=[],

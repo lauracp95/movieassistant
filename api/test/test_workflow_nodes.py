@@ -313,11 +313,11 @@ class TestFindMoviesNode:
             "rejected_titles": ["Bad Movie"],
         })
 
-        mock_movie_finder.find_movies.assert_called_once_with(
-            constraints=constraints,
-            limit=10,
-            excluded_titles=["Bad Movie"],
-        )
+        call_kwargs = mock_movie_finder.find_movies.call_args.kwargs
+        assert call_kwargs["constraints"] == constraints
+        assert call_kwargs["limit"] == 10
+        assert call_kwargs["excluded_titles"] == ["Bad Movie"]
+        assert call_kwargs["search_query"] is None
 
     def test_find_movies_node_handles_empty_results(self, mock_movie_finder):
         mock_movie_finder.find_movies.return_value = []

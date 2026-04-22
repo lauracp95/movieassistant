@@ -105,6 +105,15 @@ def create_input_orchestrate_node(
             f"needs_recommendation={decision.needs_recommendation}"
         )
 
+        if decision.search_query and not decision.search_query.is_empty():
+            logger.info(
+                f"Extracted search query: actors={decision.search_query.actors}, "
+                f"directors={decision.search_query.directors}, "
+                f"year={decision.search_query.year}, "
+                f"year_range=({decision.search_query.year_start}, {decision.search_query.year_end}), "
+                f"keywords={decision.search_query.keywords}"
+            )
+
         if decision.needs_clarification:
             clarification = (
                 decision.clarification_question
@@ -113,6 +122,7 @@ def create_input_orchestrate_node(
             return {
                 "route": "clarification",
                 "constraints": decision.constraints,
+                "search_query": None,
                 "needs_recommendation": False,
                 "rag_query": None,
                 "final_response": clarification,
@@ -121,6 +131,7 @@ def create_input_orchestrate_node(
         return {
             "route": decision.route,
             "constraints": decision.constraints,
+            "search_query": decision.search_query,
             "needs_recommendation": decision.needs_recommendation,
             "rag_query": decision.rag_query,
         }
@@ -224,8 +235,8 @@ def create_find_movies_node(
     """Create the find_movies node that retrieves candidate movies.
 
     This node uses the MovieFinderAgent to retrieve candidate movies
-    based on user constraints. The candidates are stored in state for
-    subsequent processing by the response node.
+    based on user constraints and rich search query. The candidates are
+    stored in state for subsequent processing by the response node.
 
     Args:
         movie_finder: The MovieFinderAgent instance.
@@ -236,10 +247,12 @@ def create_find_movies_node(
 
     def find_movies(state: MovieNightState) -> dict:
         constraints = state.get("constraints") or Constraints()
+        search_query = state.get("search_query")
         rejected_titles = state.get("rejected_titles", [])
 
         logger.info(
             f"Find movies node: constraints={constraints}, "
+            f"search_query={search_query is not None}, "
             f"rejected={len(rejected_titles)} titles"
         )
 
@@ -247,6 +260,7 @@ def create_find_movies_node(
             constraints=constraints,
             limit=10,
             excluded_titles=rejected_titles,
+            search_query=search_query,
         )
 
         logger.info(f"Find movies node found {len(candidates)} candidates")
