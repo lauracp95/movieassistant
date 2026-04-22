@@ -11,6 +11,7 @@ dependencies = [
     "langchain-openai>=1.1.7",
     "langchain-core>=1.2.9",
     "langgraph>=0.4.0",
+    "langsmith>=0.3.0",
     "httpx>=0.28.1",
 ]
 

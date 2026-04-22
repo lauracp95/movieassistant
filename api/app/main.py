@@ -15,6 +15,7 @@ from app.llm.movie_finder_agent import MovieFinderAgent
 from app.llm.rag_agent import LLMRAGAssistantAgent
 from app.llm.recommendation_agent import LLMRecommendationWriterAgent
 from app.llm.workflow import MovieNightWorkflow
+from app.observability import configure_langsmith, get_tracing_status
 from app.rag.retriever import create_retriever
 from app.settings import Settings, get_settings
 
@@ -71,6 +72,11 @@ async def lifespan(app: FastAPI):
     """Initialize workflow on startup, clean up on shutdown."""
     try:
         settings = get_settings()
+
+        tracing_enabled = configure_langsmith(settings)
+        if tracing_enabled:
+            status = get_tracing_status()
+            logger.info(f"LangSmith tracing active: project={status['project']}")
 
         llm = create_chat_model(settings)
         input_agent_llm = create_chat_model(settings, temperature=0.0)

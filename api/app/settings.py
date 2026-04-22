@@ -60,6 +60,29 @@ class Settings(BaseSettings):
         default="auto",
         description="Movie finder mode: 'tmdb', 'stub', or 'auto' (auto-detect based on API key)"
     )
+    
+    # LangSmith observability (optional)
+    langchain_tracing_v2: bool = Field(
+        default=False,
+        description="Enable LangSmith tracing for LLM calls and workflow runs"
+    )
+    langchain_api_key: str | None = Field(
+        default=None,
+        description="LangSmith API key for tracing"
+    )
+    langchain_project: str = Field(
+        default="movie-night-assistant",
+        description="LangSmith project name for organizing traces"
+    )
+    langchain_endpoint: str = Field(
+        default="https://api.smith.langchain.com",
+        description="LangSmith API endpoint"
+    )
+
+    @property
+    def langsmith_enabled(self) -> bool:
+        """Check if LangSmith tracing is properly configured and enabled."""
+        return self.langchain_tracing_v2 and self.langchain_api_key is not None
 
     # model_config tells Pydantic how to load settings
     model_config = {

@@ -1,8 +1,10 @@
 import logging
+from typing import Any
 
 from fastapi import APIRouter, HTTPException
 
 from app.llm.workflow import MovieNightWorkflow
+from app.observability import traced_chat
 from app.schemas import ChatRequest, ChatResponse, HealthResponse
 from app.schemas.chat import DebugInfo
 
@@ -35,6 +37,31 @@ def cleanup_workflow() -> None:
 def health() -> HealthResponse:
     """Health check endpoint."""
     return HealthResponse(status="ok")
+
+
+def _enrich_trace_metadata(trace_meta: dict[str, Any], result: dict) -> None:
+    """Enrich trace metadata with workflow execution results.
+
+    This function updates the trace metadata dictionary with information
+    discovered during workflow execution, enabling filtering and debugging
+    in LangSmith UI.
+
+    Args:
+        trace_meta: Mutable metadata dictionary from traced_chat context.
+        result: The complete workflow state after execution.
+    """
+    trace_meta["route"] = result.get("route")
+    trace_meta["has_constraints"] = result.get("constraints") is not None
+    trace_meta["retry_count"] = result.get("retry_count", 0)
+    trace_meta["recommendation_generated"] = result.get("draft_recommendation") is not None
+
+    evaluation = result.get("evaluation_result")
+    if evaluation is not None:
+        trace_meta["evaluation_passed"] = evaluation.passed
+        trace_meta["evaluation_score"] = evaluation.score
+
+    trace_meta["candidates_found"] = len(result.get("candidate_movies", []))
+    trace_meta["contexts_retrieved"] = len(result.get("retrieved_contexts", []))
 
 
 def _build_debug_info(result: dict) -> DebugInfo:
@@ -93,6 +120,9 @@ def chat(request: ChatRequest) -> ChatResponse:
     The workflow orchestrates intent classification, constraint extraction,
     and response generation through a series of graph nodes.
 
+    All LLM calls and workflow steps are traced in LangSmith when enabled,
+    with metadata including route, constraints, and retry information.
+
     Args:
         request: The chat request containing the user message.
 
@@ -108,41 +138,47 @@ def chat(request: ChatRequest) -> ChatResponse:
             detail="Workflow not initialized",
         )
 
-    try:
-        logger.info(f"Processing chat request: {request.message[:50]}...")
+    session_id = getattr(request, "session_id", None)
 
-        result = workflow.invoke(request.message)
+    with traced_chat(request.message, session_id=session_id) as trace_meta:
+        try:
+            logger.info(f"Processing chat request: {request.message[:50]}...")
 
-        final_response = result.get("final_response")
-        if not final_response:
-            raise RuntimeError("Workflow did not produce a response")
+            result = workflow.invoke(request.message)
 
-        route = result.get("route")
-        constraints = result.get("constraints")
+            final_response = result.get("final_response")
+            if not final_response:
+                raise RuntimeError("Workflow did not produce a response")
 
-        route_value = None
-        if route in ("movies", "rag", "hybrid"):
-            route_value = route
-        elif route == "clarification":
-            route_value = "movies"
-        elif route == "system":
-            route_value = "rag"
+            route = result.get("route")
+            constraints = result.get("constraints")
 
-        debug_info = _build_debug_info(result)
+            _enrich_trace_metadata(trace_meta, result)
 
-        logger.info(f"Chat response generated successfully ({len(final_response)} chars)")
+            route_value = None
+            if route in ("movies", "rag", "hybrid"):
+                route_value = route
+            elif route == "clarification":
+                route_value = "movies"
+            elif route == "system":
+                route_value = "rag"
 
-        return ChatResponse(
-            reply=final_response,
-            route=route_value,
-            extracted_constraints=constraints,
-            debug=debug_info,
-        )
+            debug_info = _build_debug_info(result)
 
-    except Exception as e:
-        logger.error(f"Chat processing failed: {e}")
-        raise HTTPException(
-            status_code=500,
-            detail="Failed to generate response. Please try again later.",
-        )
+            logger.info(f"Chat response generated successfully ({len(final_response)} chars)")
+
+            return ChatResponse(
+                reply=final_response,
+                route=route_value,
+                extracted_constraints=constraints,
+                debug=debug_info,
+            )
+
+        except Exception as e:
+            logger.error(f"Chat processing failed: {e}")
+            trace_meta["error"] = str(e)
+            raise HTTPException(
+                status_code=500,
+                detail="Failed to generate response. Please try again later.",
+            )
 
