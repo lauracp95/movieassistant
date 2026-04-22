@@ -21,7 +21,7 @@ class Constraints(BaseModel):
 
 
 class OrchestratorDecision(BaseModel):
-    """Structured output from the Orchestrator Agent (legacy/Phase 1)."""
+    """Structured output from the basic OrchestratorAgent (movies/system routes only)."""
 
     intent: Literal["movies", "system"] = Field(
         ...,
@@ -48,9 +48,9 @@ class OrchestratorDecision(BaseModel):
 
 
 class InputDecision(BaseModel):
-    """Structured output from the InputOrchestratorAgent (Phase 2).
+    """Structured output from the InputOrchestratorAgent.
 
-    This schema supports richer routing with movies, rag, and hybrid routes.
+    This schema supports full routing with movies, rag, and hybrid routes.
     """
 
     route: Literal["movies", "rag", "hybrid"] = Field(

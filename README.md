@@ -5,14 +5,15 @@ A chat assistant for planning movie nights, powered by Azure OpenAI via LangChai
 ## Architecture
 
 - **Backend**: FastAPI application with `/health` and `/chat` endpoints
-- **Frontend**: Streamlit chat interface
-- **LLM**: Azure OpenAI via LangChain (separate model instances for routing, writing, and evaluation)
+- **Frontend**: Streamlit chat interface with debug info panel
+- **LLM**: Azure OpenAI via LangChain (separate model instances for routing, writing, evaluation, and RAG)
 - **Workflow**: LangGraph `StateGraph` (`MovieNightWorkflow`) coordinating nodes and conditional edges
 - **Input Orchestrator Agent**: Routes to `movies`, `rag`, or `hybrid`; extracts constraints; may ask for clarification
 - **Movie Finder Agent**: Retrieves candidate movies from TMDB (or stub data for testing)
-- **Recommendation Writer Agent**: Picks a candidate and produces recommendation prose grounded in movie metadata
-- **Evaluator Agent**: Scores each draft; on failure the workflow retries (up to `MAX_RETRIES`) and accumulates **rejected titles** so the finder and writer avoid repeating bad picks; exhausted retries yield a safe fallback message
-- **Responders**: Movies and system responders for formatting and non-retrieval paths
+- **Recommendation Writer Agent**: Selects a candidate and produces recommendation prose grounded in movie metadata
+- **Evaluator Agent**: Validates drafts against constraints and quality criteria; on failure the workflow retries (up to `MAX_RETRIES`) and accumulates **rejected titles** so the writer avoids repeating bad picks; exhausted retries yield a safe fallback message
+- **RAG Assistant Agent**: Answers system questions using retrieved documentation from the knowledge base
+- **Document Retriever**: TF-IDF based retrieval over markdown knowledge base files
 
 ## How It Works
 
@@ -22,13 +23,14 @@ A chat assistant for planning movie nights, powered by Azure OpenAI via LangChai
    - Extracts constraints (genres, runtime) when relevant
    - Sets `rag_query` for knowledge-style questions
 3. **Clarification** ends early with a direct reply.
-4. **`rag`** goes straight to **System Responder** (no movie retrieval).
-5. **`movies` / `hybrid`** run **Find movies** → **Write recommendation** → **Evaluate** (when an evaluator is configured):
+4. **`rag`** retrieves relevant documents from the knowledge base and generates a grounded answer via the RAG Assistant Agent.
+5. **`movies`** runs **Find movies** → **Write recommendation** → **Evaluate** (when an evaluator is configured):
    - The finder can exclude titles in `rejected_titles`
    - If evaluation fails, the draft is cleared, the failed title is added to `rejected_titles`, `retry_count` increments, and the graph loops back to **Write recommendation** while under `MAX_RETRIES`
    - If retries are exhausted (or there is no viable draft), **Respond** uses a polite fallback instead of a low-quality recommendation
-6. **Respond** returns final text (draft text when evaluation passed, or formatted candidates / system answer as appropriate)
-7. The API returns the reply plus route and extracted constraints
+6. **`hybrid`** combines both flows: **Find movies** → **RAG retrieve** → **Write recommendation** → **Evaluate** → **Respond**
+7. **Respond** returns final text (draft text when evaluation passed, RAG answer, or formatted candidates as appropriate)
+8. The API returns the reply plus route and extracted constraints
 
 ## Required Environment Variables
 
@@ -201,56 +203,62 @@ The production app wires `LLMEvaluatorAgent` in `api/app/main.py` after the reco
 │   │   ├── settings.py          # Environment configuration
 │   │   ├── agents/
 │   │   │   ├── __init__.py
-│   │   │   ├── orchestrator.py  # Legacy orchestrator (movies vs system)
-│   │   │   └── responder.py     # Movies and System responders
+│   │   │   ├── orchestrator.py  # Basic orchestrator (backward compatibility)
+│   │   │   └── responder.py     # Fallback responders
 │   │   ├── api/
 │   │   │   ├── __init__.py
 │   │   │   └── routes.py        # /health and /chat endpoints
 │   │   ├── integrations/
 │   │   │   ├── __init__.py
-│   │   │   └── tmdb_client.py    # TMDB API client
+│   │   │   └── tmdb_client.py   # TMDB API client
 │   │   ├── llm/
 │   │   │   ├── __init__.py
 │   │   │   ├── client.py         # Azure OpenAI model factory
-│   │   │   ├── model_provider.py # ModelProvider class
-│   │   │   ├── evaluator_agent.py # Evaluator (stub + LLM, Phase 5)
-│   │   │   ├── input_agent.py    # Input orchestrator (movies / rag / hybrid)
-│   │   │   ├── movie_finder_agent.py # Movie finder agents (Stub, TMDB)
-│   │   │   ├── rag_agent.py      # RAG assistant agent (Phase 6)
-│   │   │   ├── recommendation_agent.py # Recommendation writer
+│   │   │   ├── evaluator_agent.py # Draft validator (stub + LLM)
+│   │   │   ├── input_agent.py    # Route classifier (movies/rag/hybrid)
+│   │   │   ├── movie_finder_agent.py # Movie retrieval (Stub, TMDB)
+│   │   │   ├── rag_agent.py      # RAG assistant for knowledge queries
+│   │   │   ├── recommendation_agent.py # Grounded recommendation writer
 │   │   │   ├── prompts.py        # System prompts for all agents
 │   │   │   ├── state.py          # MovieNightState, MAX_RETRIES, PASS_THRESHOLD
-│   │   │   └── workflow.py       # LangGraph graph, nodes, retry routing
+│   │   │   └── workflow.py       # LangGraph graph, nodes, conditional routing
 │   │   ├── rag/
 │   │   │   ├── __init__.py
 │   │   │   ├── ingest.py         # Document ingestion and chunking
 │   │   │   ├── retriever.py      # TF-IDF document retrieval
 │   │   │   └── knowledge_base/   # Markdown docs for RAG
+│   │   │       ├── system_overview.md
+│   │   │       ├── recommendation_rules.md
+│   │   │       ├── evaluation_logic.md
+│   │   │       ├── data_sources.md
+│   │   │       ├── routing_logic.md
+│   │   │       └── known_limitations.md
 │   │   └── schemas/
 │   │       ├── __init__.py
 │   │       ├── chat.py           # API request/response models
-│   │       ├── domain.py         # Domain models (MovieResult, DraftRecommendation, EvaluationResult, …)
-│   │       └── orchestrator.py   # Orchestrator / input decision models
+│   │       ├── domain.py         # Domain models (MovieResult, DraftRecommendation, etc.)
+│   │       └── orchestrator.py   # Orchestrator/input decision models
 │   ├── test/
 │   │   ├── conftest.py
+│   │   ├── test_domain.py
 │   │   ├── test_evaluator_agent.py
 │   │   ├── test_input_agent.py
-│   │   ├── test_main.py
+│   │   ├── test_main.py          # API endpoint tests
 │   │   ├── test_movie_finder.py
 │   │   ├── test_rag.py           # RAG retriever, ingester, and agent tests
 │   │   ├── test_recommendation_agent.py
 │   │   ├── test_state.py
 │   │   ├── test_tmdb_client.py
-│   │   ├── test_domain.py
-│   │   └── test_workflow.py      # LangGraph and end-to-end workflow tests
+│   │   └── test_workflow.py      # LangGraph and workflow integration tests
 │   ├── Dockerfile
 │   └── pyproject.toml
 ├── ui/
 │   ├── app/
-│   │   └── streamlit_app.py     # Chat interface with debug info toggle
+│   │   └── streamlit_app.py     # Chat interface with debug info panel
 │   ├── Dockerfile
 │   └── pyproject.toml
 ├── docker-compose.yml
+├── .env.example
 └── README.md
 ```
 

@@ -11,9 +11,15 @@ logger = logging.getLogger(__name__)
 
 
 class OrchestratorAgent:
-    """Orchestrator Agent that classifies intent and extracts constraints.
+    """Basic orchestrator that classifies intent and extracts constraints.
 
     Uses LangChain's structured output to produce validated Pydantic models.
+
+    Note: This orchestrator supports only movies/system routes. For full
+    functionality with RAG and hybrid routing, use
+    :class:`app.llm.input_agent.InputOrchestratorAgent` instead.
+
+    This agent serves as a fallback when InputOrchestratorAgent is not available.
     """
 
     def __init__(self, llm: AzureChatOpenAI) -> None:

@@ -1,4 +1,4 @@
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -22,6 +22,35 @@ class ChatRequest(BaseModel):
         return v
 
 
+class DebugInfo(BaseModel):
+    """Debug information from workflow execution."""
+
+    rag_query: str | None = Field(
+        default=None,
+        description="RAG query generated for knowledge retrieval",
+    )
+    retrieved_contexts: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description="Documents retrieved from the knowledge base",
+    )
+    selected_movie: dict[str, Any] | None = Field(
+        default=None,
+        description="Movie selected for recommendation",
+    )
+    evaluation: dict[str, Any] | None = Field(
+        default=None,
+        description="Evaluation result for the recommendation",
+    )
+    retry_count: int = Field(
+        default=0,
+        description="Number of evaluation retries",
+    )
+    rejected_titles: list[str] = Field(
+        default_factory=list,
+        description="Titles rejected during evaluation retries",
+    )
+
+
 class ChatResponse(BaseModel):
     """Response body from the /chat endpoint."""
 
@@ -31,11 +60,15 @@ class ChatResponse(BaseModel):
     )
     route: Literal["movies", "system", "rag", "hybrid"] | None = Field(
         default=None,
-        description="The detected intent route (movies, rag, hybrid, or system for legacy)",
+        description="The detected intent route (movies, rag, or hybrid)",
     )
     extracted_constraints: Constraints | None = Field(
         default=None,
         description="Extracted constraints from the user message (for debugging)",
+    )
+    debug: DebugInfo | None = Field(
+        default=None,
+        description="Debug information from workflow execution (optional)",
     )
 
 

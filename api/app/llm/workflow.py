@@ -1,30 +1,39 @@
-"""LangGraph workflow skeleton for the Movie Night Assistant.
+"""LangGraph workflow for the Movie Night Assistant.
 
-This module provides the minimal executable graph that routes user
-messages through the existing MVP behavior. The workflow wraps the
-current orchestrator/responder flow while establishing the architectural
-backbone for future phases.
+This module implements the complete recommendation workflow using LangGraph's
+StateGraph. The workflow orchestrates multiple agents through a series of
+nodes with conditional routing based on user intent.
 
-Graph Shape (Phase 6 - RAG Integration):
+Graph Shape:
 
     START
-      |
-      v
-    [input_orchestrate]  -- Classifies route (movies/rag/hybrid), extracts constraints
-      |
-      v (conditional)
+      │
+      ▼
+    [input_orchestrate]  ─ Classifies route (movies/rag/hybrid), extracts constraints
+      │
+      ▼ (conditional)
       ├── clarification → END (response already set)
       ├── rag → [rag_retrieve] → [rag_respond] → END
       ├── hybrid → [find_movies] → [rag_retrieve] → [write_recommendation] → [evaluate] → [respond] → END
       └── movies → [find_movies] → [write_recommendation] → [evaluate] → [respond] → END
 
-The evaluate node is inserted only when an EvaluatorAgent is provided.
-When absent, the graph falls back to the Phase 4 behavior (draft text
-used as-is without validation).
+Key Features:
 
-The RAG nodes (rag_retrieve, rag_respond) are inserted when a DocumentRetriever
-and RAGAssistantAgent are provided. For hybrid routes, rag_retrieve runs after
-find_movies to provide context for grounded explanations.
+- **Route Classification**: InputOrchestratorAgent determines whether the request
+  needs movie recommendations (movies), knowledge retrieval (rag), or both (hybrid).
+
+- **Movie Discovery**: MovieFinderAgent retrieves candidates from TMDB or stub data.
+
+- **Recommendation Writing**: RecommendationWriterAgent generates grounded prose
+  based on movie metadata and user constraints.
+
+- **Quality Evaluation**: EvaluatorAgent validates recommendations against
+  constraints and quality criteria, with automatic retry on failure.
+
+- **RAG Integration**: DocumentRetriever and RAGAssistantAgent answer system
+  questions using the knowledge base.
+
+The workflow supports graceful degradation when optional agents are not provided.
 """
 
 import logging
@@ -60,7 +69,9 @@ def create_orchestrate_node(
 ) -> Callable[[MovieNightState], dict]:
     """Create the orchestrate node that classifies intent and extracts constraints.
 
-    This is the legacy Phase 1 orchestrate node. Kept for backward compatibility.
+    Note: This uses the simpler OrchestratorAgent that supports only movies/system
+    routes. For full functionality (movies/rag/hybrid), use InputOrchestratorAgent
+    with create_input_orchestrate_node instead.
 
     Args:
         orchestrator: The OrchestratorAgent instance.
@@ -102,7 +113,7 @@ def create_orchestrate_node(
 def create_input_orchestrate_node(
     input_agent: InputOrchestratorAgent,
 ) -> Callable[[MovieNightState], dict]:
-    """Create the input orchestrate node for Phase 2 routing.
+    """Create the input orchestrate node for full route classification.
 
     This node uses the InputOrchestratorAgent to classify routes as
     movies, rag, or hybrid, extract constraints, and generate RAG queries.
@@ -155,14 +166,15 @@ def create_respond_node(
 ) -> Callable[[MovieNightState], dict]:
     """Create the respond node that generates the final response.
 
-    For movie routes, this node uses candidate_movies from state to
-    generate a response. If candidates are available, it formats them
-    into a simple response. The RecommendationWriterAgent (future phase)
-    will handle sophisticated response generation.
+    For movie routes, this node uses the draft recommendation text when
+    available (from RecommendationWriterAgent), or falls back to a
+    simple formatted list of candidates.
+
+    For RAG routes without dedicated RAG nodes, falls back to SystemResponder.
 
     Args:
-        movies_responder: The MoviesResponder instance.
-        system_responder: The SystemResponder instance.
+        movies_responder: The MoviesResponder instance (fallback for simple responses).
+        system_responder: The SystemResponder instance (fallback for RAG routes).
 
     Returns:
         A node function that generates the response based on route.
@@ -228,10 +240,10 @@ def _format_candidate_response(
     candidates: list,
     constraints: Constraints,
 ) -> str:
-    """Format candidate movies into a simple response.
+    """Format candidate movies into a simple list response.
 
-    This is a temporary formatting function. The RecommendationWriterAgent
-    (future phase) will replace this with sophisticated recommendation text.
+    This is a fallback formatter used when no draft recommendation is available.
+    The primary path uses RecommendationWriterAgent for richer, grounded prose.
 
     Args:
         candidates: List of MovieResult objects.
@@ -547,7 +559,7 @@ def route_after_evaluate(state: MovieNightState) -> str:
 
 
 def route_after_orchestrate(state: MovieNightState) -> str:
-    """Determine the next node after orchestration (legacy/no-RAG version).
+    """Determine the next node after orchestration (without RAG components).
 
     Routes to:
     - END if clarification is needed (response already set)
@@ -624,12 +636,14 @@ class MovieNightWorkflow:
     Encapsulates the graph construction and provides a simple interface
     for executing the workflow with a user message.
 
-    Supports two modes:
-    - Legacy mode: Uses OrchestratorAgent (Phase 1)
-    - Input agent mode: Uses InputOrchestratorAgent (Phase 2/3)
+    The workflow can be configured with different combinations of agents:
 
-    Phase 3 adds MovieFinderAgent for candidate retrieval.
-    Phase 6 adds RAG retrieval and response for system questions.
+    - **Full mode** (recommended): InputOrchestratorAgent + MovieFinderAgent +
+      RecommendationWriterAgent + EvaluatorAgent + RAG components
+
+    - **Minimal mode**: OrchestratorAgent only (limited to movies/system routes)
+
+    All optional agents degrade gracefully when not provided.
     """
 
     def __init__(
@@ -647,23 +661,21 @@ class MovieNightWorkflow:
         """Initialize the workflow with agent instances.
 
         Args:
-            orchestrator: The OrchestratorAgent for intent classification (legacy).
-            movies_responder: The MoviesResponder for movie requests.
-            system_responder: The SystemResponder for system questions.
-            input_agent: The InputOrchestratorAgent for Phase 2 routing.
-                        If provided, it takes precedence over orchestrator.
-            movie_finder: The MovieFinderAgent for Phase 3 candidate retrieval.
-                         If not provided, skips candidate retrieval step.
-            recommendation_writer: The RecommendationWriterAgent for Phase 4
-                composition. If provided, inserts a write_recommendation
-                step between find_movies and respond.
-            evaluator: The EvaluatorAgent for Phase 5 draft validation.
-                If provided (and a writer is also provided), inserts an
-                evaluate step between write_recommendation and respond
-                with a retry loop back to write_recommendation on failure.
-            rag_retriever: The DocumentRetriever for Phase 6 RAG retrieval.
-                If provided, enables RAG-based responses for system questions.
-            rag_agent: The RAGAssistantAgent for Phase 6 grounded answers.
+            orchestrator: The OrchestratorAgent for simple intent classification.
+                Used only if input_agent is not provided (limited functionality).
+            movies_responder: The MoviesResponder for fallback movie responses.
+            system_responder: The SystemResponder for fallback system questions.
+            input_agent: The InputOrchestratorAgent for full route classification
+                (movies/rag/hybrid). Recommended - takes precedence over orchestrator.
+            movie_finder: The MovieFinderAgent for candidate retrieval from TMDB.
+                If not provided, no movie candidates are retrieved.
+            recommendation_writer: The RecommendationWriterAgent for grounded prose.
+                If provided, generates rich recommendation text instead of lists.
+            evaluator: The EvaluatorAgent for draft validation with retry loop.
+                Requires recommendation_writer. Validates constraints and quality.
+            rag_retriever: The DocumentRetriever for knowledge base retrieval.
+                Enables RAG-based responses for system questions.
+            rag_agent: The RAGAssistantAgent for grounded answers from docs.
                 Must be provided with rag_retriever for RAG functionality.
         """
         self._orchestrator = orchestrator
@@ -681,11 +693,11 @@ class MovieNightWorkflow:
         """Build and compile the workflow graph.
 
         Uses InputOrchestratorAgent if available, otherwise falls back
-        to legacy OrchestratorAgent. If MovieFinderAgent is provided,
+        to basic OrchestratorAgent. If MovieFinderAgent is provided,
         adds candidate retrieval before response generation.
 
-        Phase 6 adds RAG retrieval and response nodes for system questions
-        and hybrid routes.
+        RAG retrieval and response nodes are added for system questions
+        and hybrid routes when rag_retriever and rag_agent are provided.
 
         Returns:
             Compiled StateGraph ready for execution.

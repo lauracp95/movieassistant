@@ -1,4 +1,4 @@
-# Use a lightweight base image with Python 3.12 preinstalled
+# Use a lightweight base image with Python 3.14 preinstalled
 FROM python:3.14-slim
 
 # Set /app as the working directory inside the container

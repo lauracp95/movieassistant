@@ -1,4 +1,4 @@
-from app.schemas.chat import ChatRequest, ChatResponse, HealthResponse
+from app.schemas.chat import ChatRequest, ChatResponse, DebugInfo, HealthResponse
 from app.schemas.domain import (
     DraftRecommendation,
     EvaluationResult,
@@ -11,6 +11,7 @@ from app.schemas.orchestrator import Constraints, InputDecision, OrchestratorDec
 __all__ = [
     "ChatRequest",
     "ChatResponse",
+    "DebugInfo",
     "HealthResponse",
     "Constraints",
     "InputDecision",
