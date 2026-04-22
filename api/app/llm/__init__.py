@@ -1,3 +1,11 @@
+from app.llm.candidate_selector import (
+    build_deterministic_recommendation_text,
+    build_reasoning,
+    detect_constraint_violations,
+    filter_candidates,
+    prioritize_candidates,
+    select_best_candidate,
+)
 from app.llm.client import create_chat_model
 from app.llm.evaluator_agent import (
     EvaluatorAgent,
@@ -39,6 +47,12 @@ from app.llm.state import (
 
 __all__ = [
     "create_chat_model",
+    "filter_candidates",
+    "prioritize_candidates",
+    "select_best_candidate",
+    "build_reasoning",
+    "build_deterministic_recommendation_text",
+    "detect_constraint_violations",
     "MovieFinderAgent",
     "StubMovieFinderAgent",
     "TMDBMovieFinderAgent",

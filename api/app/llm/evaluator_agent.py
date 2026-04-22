@@ -28,61 +28,12 @@ from abc import ABC, abstractmethod
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import AzureChatOpenAI
 
+from app.llm.candidate_selector import detect_constraint_violations
 from app.llm.prompts import EVALUATOR_SYSTEM_PROMPT
 from app.schemas.domain import DraftRecommendation, EvaluationResult
 from app.schemas.orchestrator import Constraints
 
 logger = logging.getLogger(__name__)
-
-
-def _detect_constraint_violations(
-    draft: DraftRecommendation,
-    constraints: Constraints,
-    rejected_titles: list[str] | None,
-) -> list[str]:
-    """Deterministically detect hard constraint violations on the draft.
-
-    Used by the stub evaluator and as a safety net in the LLM evaluator.
-
-    Args:
-        draft: The candidate draft recommendation.
-        constraints: User constraints.
-        rejected_titles: Titles already rejected in previous retries.
-
-    Returns:
-        A list of violation strings. Empty if the draft is clean.
-    """
-    violations: list[str] = []
-    movie = draft.movie
-
-    excluded = {t.lower() for t in (rejected_titles or [])}
-    if movie.title.lower() in excluded:
-        violations.append(f"title '{movie.title}' is in the rejected list")
-
-    if (
-        constraints.max_runtime_minutes is not None
-        and movie.runtime_minutes is not None
-        and movie.runtime_minutes > constraints.max_runtime_minutes
-    ):
-        violations.append(
-            f"runtime {movie.runtime_minutes}m exceeds max "
-            f"{constraints.max_runtime_minutes}m"
-        )
-
-    if (
-        constraints.min_runtime_minutes is not None
-        and movie.runtime_minutes is not None
-        and movie.runtime_minutes < constraints.min_runtime_minutes
-    ):
-        violations.append(
-            f"runtime {movie.runtime_minutes}m is below min "
-            f"{constraints.min_runtime_minutes}m"
-        )
-
-    if not draft.recommendation_text or not draft.recommendation_text.strip():
-        violations.append("recommendation text is empty")
-
-    return violations
 
 
 class EvaluatorAgent(ABC):
@@ -138,9 +89,7 @@ class StubEvaluatorAgent(EvaluatorAgent):
         draft: DraftRecommendation,
         rejected_titles: list[str] | None = None,
     ) -> EvaluationResult:
-        violations = _detect_constraint_violations(
-            draft, constraints, rejected_titles
-        )
+        violations = detect_constraint_violations(draft, constraints, rejected_titles)
 
         if violations:
             logger.info(
@@ -193,9 +142,7 @@ class LLMEvaluatorAgent(EvaluatorAgent):
         draft: DraftRecommendation,
         rejected_titles: list[str] | None = None,
     ) -> EvaluationResult:
-        violations = _detect_constraint_violations(
-            draft, constraints, rejected_titles
-        )
+        violations = detect_constraint_violations(draft, constraints, rejected_titles)
         if violations:
             logger.info(
                 f"LLMEvaluator: draft for '{draft.movie.title}' failed "
@@ -245,52 +192,8 @@ class LLMEvaluatorAgent(EvaluatorAgent):
         rejected_titles: list[str] | None,
     ) -> EvaluationResult:
         """Call the LLM to produce a structured :class:`EvaluationResult`."""
-        constraint_lines: list[str] = []
-        if constraints.genres:
-            constraint_lines.append(f"- genres: {', '.join(constraints.genres)}")
-        if constraints.max_runtime_minutes:
-            constraint_lines.append(
-                f"- max runtime: {constraints.max_runtime_minutes} min"
-            )
-        if constraints.min_runtime_minutes:
-            constraint_lines.append(
-                f"- min runtime: {constraints.min_runtime_minutes} min"
-            )
-        constraints_text = (
-            "\n".join(constraint_lines) if constraint_lines else "- (none detected)"
-        )
-
-        movie = draft.movie
-        movie_lines = [
-            f"- title: {movie.title}",
-            f"- year: {movie.year if movie.year is not None else 'unknown'}",
-            f"- genres: {', '.join(movie.genres) if movie.genres else 'unknown'}",
-            (
-                f"- runtime: {movie.runtime_minutes} min"
-                if movie.runtime_minutes is not None
-                else "- runtime: unknown"
-            ),
-            (
-                f"- rating: {movie.rating:.1f}/10"
-                if movie.rating is not None
-                else "- rating: unknown"
-            ),
-            f"- overview: {movie.overview or 'not available'}",
-        ]
-        movie_block = "\n".join(movie_lines)
-
-        rejected_block = (
-            ", ".join(rejected_titles) if rejected_titles else "(none)"
-        )
-
-        human_content = (
-            f"User request: {user_message}\n\n"
-            f"User constraints:\n{constraints_text}\n\n"
-            f"Selected movie (the only movie to judge):\n{movie_block}\n\n"
-            f"Rejected titles (must not be picked):\n{rejected_block}\n\n"
-            f"Recommendation text produced by the writer:\n"
-            f"\"\"\"\n{draft.recommendation_text}\n\"\"\"\n\n"
-            "Evaluate the draft now and return the structured JSON verdict."
+        human_content = self._build_prompt(
+            user_message, constraints, draft, rejected_titles
         )
 
         messages = [
@@ -306,3 +209,56 @@ class LLMEvaluatorAgent(EvaluatorAgent):
             f"{result.model_dump_json()}"
         )
         return result
+
+    def _build_prompt(
+        self,
+        user_message: str,
+        constraints: Constraints,
+        draft: DraftRecommendation,
+        rejected_titles: list[str] | None,
+    ) -> str:
+        """Build the user prompt for the LLM."""
+        constraints_text = self._format_constraints(constraints)
+        movie_block = self._format_movie(draft.movie)
+        rejected_block = ", ".join(rejected_titles) if rejected_titles else "(none)"
+
+        return (
+            f"User request: {user_message}\n\n"
+            f"User constraints:\n{constraints_text}\n\n"
+            f"Selected movie (the only movie to judge):\n{movie_block}\n\n"
+            f"Rejected titles (must not be picked):\n{rejected_block}\n\n"
+            f"Recommendation text produced by the writer:\n"
+            f'"""\n{draft.recommendation_text}\n"""\n\n'
+            "Evaluate the draft now and return the structured JSON verdict."
+        )
+
+    def _format_constraints(self, constraints: Constraints) -> str:
+        """Format constraints for the prompt."""
+        lines: list[str] = []
+        if constraints.genres:
+            lines.append(f"- genres: {', '.join(constraints.genres)}")
+        if constraints.max_runtime_minutes:
+            lines.append(f"- max runtime: {constraints.max_runtime_minutes} min")
+        if constraints.min_runtime_minutes:
+            lines.append(f"- min runtime: {constraints.min_runtime_minutes} min")
+        return "\n".join(lines) if lines else "- (none detected)"
+
+    def _format_movie(self, movie) -> str:
+        """Format movie data for the prompt."""
+        lines = [
+            f"- title: {movie.title}",
+            f"- year: {movie.year if movie.year is not None else 'unknown'}",
+            f"- genres: {', '.join(movie.genres) if movie.genres else 'unknown'}",
+            (
+                f"- runtime: {movie.runtime_minutes} min"
+                if movie.runtime_minutes is not None
+                else "- runtime: unknown"
+            ),
+            (
+                f"- rating: {movie.rating:.1f}/10"
+                if movie.rating is not None
+                else "- rating: unknown"
+            ),
+            f"- overview: {movie.overview or 'not available'}",
+        ]
+        return "\n".join(lines)

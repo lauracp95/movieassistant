@@ -5,10 +5,10 @@ from unittest.mock import MagicMock
 import pytest
 from langchain_openai import AzureChatOpenAI
 
+from app.llm.candidate_selector import detect_constraint_violations
 from app.llm.evaluator_agent import (
     LLMEvaluatorAgent,
     StubEvaluatorAgent,
-    _detect_constraint_violations,
 )
 from app.schemas.domain import DraftRecommendation, EvaluationResult, MovieResult
 from app.schemas.orchestrator import Constraints
@@ -49,42 +49,42 @@ def _draft(
 class TestDetectConstraintViolations:
     def test_no_violations_for_clean_draft(self):
         draft = _draft(_movie("1", "Clean", runtime_minutes=100))
-        violations = _detect_constraint_violations(
+        violations = detect_constraint_violations(
             draft, Constraints(max_runtime_minutes=120), rejected_titles=[]
         )
         assert violations == []
 
     def test_flags_rejected_title(self):
         draft = _draft(_movie("1", "Bad Movie", runtime_minutes=100))
-        violations = _detect_constraint_violations(
+        violations = detect_constraint_violations(
             draft, Constraints(), rejected_titles=["Bad Movie"]
         )
         assert any("rejected" in v.lower() for v in violations)
 
     def test_rejected_title_is_case_insensitive(self):
         draft = _draft(_movie("1", "The Matrix", runtime_minutes=100))
-        violations = _detect_constraint_violations(
+        violations = detect_constraint_violations(
             draft, Constraints(), rejected_titles=["the matrix"]
         )
         assert any("rejected" in v.lower() for v in violations)
 
     def test_flags_runtime_over_max(self):
         draft = _draft(_movie("1", "Long", runtime_minutes=200))
-        violations = _detect_constraint_violations(
+        violations = detect_constraint_violations(
             draft, Constraints(max_runtime_minutes=120), rejected_titles=[]
         )
         assert any("exceeds max" in v for v in violations)
 
     def test_flags_runtime_below_min(self):
         draft = _draft(_movie("1", "Short", runtime_minutes=60))
-        violations = _detect_constraint_violations(
+        violations = detect_constraint_violations(
             draft, Constraints(min_runtime_minutes=90), rejected_titles=[]
         )
         assert any("below min" in v for v in violations)
 
     def test_flags_empty_recommendation_text(self):
         draft = _draft(_movie("1", "Empty"), text="   ")
-        violations = _detect_constraint_violations(
+        violations = detect_constraint_violations(
             draft, Constraints(), rejected_titles=[]
         )
         assert any("empty" in v for v in violations)
