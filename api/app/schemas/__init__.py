@@ -6,11 +6,10 @@ from app.schemas.domain import (
     RetrievedContext,
     RouteDecision,
 )
-from app.schemas.orchestrator import (
+from app.schemas.input import (
     Constraints,
     InputDecision,
     MovieSearchQuery,
-    OrchestratorDecision,
 )
 
 __all__ = [
@@ -21,7 +20,6 @@ __all__ = [
     "Constraints",
     "InputDecision",
     "MovieSearchQuery",
-    "OrchestratorDecision",
     "MovieResult",
     "DraftRecommendation",
     "EvaluationResult",

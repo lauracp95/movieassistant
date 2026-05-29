@@ -1,6 +1,6 @@
 """Unit tests for the state module."""
 
-from app.llm.state import (
+from app.workflow.state import (
     MAX_MOVIE_SEARCHES,
     MAX_RETRIES,
     PASS_THRESHOLD,
@@ -8,7 +8,7 @@ from app.llm.state import (
     RouteType,
     create_initial_state,
 )
-from app.schemas.orchestrator import Constraints
+from app.schemas.input import Constraints
 
 
 class TestConfigurationConstants:

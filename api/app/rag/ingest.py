@@ -10,7 +10,7 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_KNOWLEDGE_BASE_PATH = Path(__file__).parent / "knowledge_base"
+DEFAULT_KNOWLEDGE_BASE_PATH = Path(__file__).parent.parent / "knowledge_base"
 DEFAULT_CHUNK_SIZE = 500
 DEFAULT_CHUNK_OVERLAP = 50
 

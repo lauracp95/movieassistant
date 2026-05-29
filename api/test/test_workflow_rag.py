@@ -1,8 +1,8 @@
 """Integration tests for MovieNightWorkflow RAG functionality."""
 
-from app.llm.workflow import MovieNightWorkflow
+from app.workflow import MovieNightWorkflow
 from app.schemas.domain import RetrievedContext
-from app.schemas.orchestrator import Constraints, InputDecision
+from app.schemas.input import Constraints, InputDecision
 
 from conftest import make_movie
 
@@ -11,7 +11,6 @@ class TestRAGWorkflowIntegration:
     def test_rag_route_uses_rag_pipeline(
         self,
         mock_input_agent,
-        mock_movies_responder,
         mock_system_responder,
         mock_movie_finder,
         stub_recommendation_writer,
@@ -37,8 +36,6 @@ class TestRAGWorkflowIntegration:
         mock_rag_agent.answer.return_value = "The Movie Night Assistant uses TMDB for movie data."
 
         workflow = MovieNightWorkflow(
-            orchestrator=None,
-            movies_responder=mock_movies_responder,
             system_responder=mock_system_responder,
             input_agent=mock_input_agent,
             movie_finder=mock_movie_finder,
@@ -60,7 +57,6 @@ class TestRAGWorkflowIntegration:
     def test_hybrid_route_uses_both_movies_and_rag(
         self,
         mock_input_agent,
-        mock_movies_responder,
         mock_system_responder,
         mock_movie_finder,
         stub_recommendation_writer,
@@ -94,8 +90,6 @@ class TestRAGWorkflowIntegration:
         ]
 
         workflow = MovieNightWorkflow(
-            orchestrator=None,
-            movies_responder=mock_movies_responder,
             system_responder=mock_system_responder,
             input_agent=mock_input_agent,
             movie_finder=mock_movie_finder,
@@ -116,7 +110,6 @@ class TestRAGWorkflowIntegration:
     def test_movies_route_with_rag_enabled_skips_rag(
         self,
         mock_input_agent,
-        mock_movies_responder,
         mock_system_responder,
         mock_movie_finder,
         stub_recommendation_writer,
@@ -143,8 +136,6 @@ class TestRAGWorkflowIntegration:
         ]
 
         workflow = MovieNightWorkflow(
-            orchestrator=None,
-            movies_responder=mock_movies_responder,
             system_responder=mock_system_responder,
             input_agent=mock_input_agent,
             movie_finder=mock_movie_finder,
@@ -163,7 +154,6 @@ class TestRAGWorkflowIntegration:
     def test_rag_route_without_rag_components_falls_back_to_system_responder(
         self,
         mock_input_agent,
-        mock_movies_responder,
         mock_system_responder,
         mock_movie_finder,
         stub_recommendation_writer,
@@ -179,8 +169,6 @@ class TestRAGWorkflowIntegration:
         mock_system_responder.respond.return_value = "Fallback system response."
 
         workflow = MovieNightWorkflow(
-            orchestrator=None,
-            movies_responder=mock_movies_responder,
             system_responder=mock_system_responder,
             input_agent=mock_input_agent,
             movie_finder=mock_movie_finder,
@@ -197,7 +185,6 @@ class TestRAGWorkflowIntegration:
     def test_rag_route_populates_retrieved_contexts_in_state(
         self,
         mock_input_agent,
-        mock_movies_responder,
         mock_system_responder,
         mock_movie_finder,
         stub_recommendation_writer,
@@ -230,8 +217,6 @@ class TestRAGWorkflowIntegration:
         mock_rag_agent.answer.return_value = "Here are the limitations..."
 
         workflow = MovieNightWorkflow(
-            orchestrator=None,
-            movies_responder=mock_movies_responder,
             system_responder=mock_system_responder,
             input_agent=mock_input_agent,
             movie_finder=mock_movie_finder,

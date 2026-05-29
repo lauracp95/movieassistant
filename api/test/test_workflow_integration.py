@@ -2,131 +2,16 @@
 
 import pytest
 
-from app.llm.workflow import MovieNightWorkflow
+from app.workflow import MovieNightWorkflow
 from app.schemas.domain import MovieResult
-from app.schemas.orchestrator import Constraints, InputDecision, OrchestratorDecision
+from app.schemas.input import Constraints, InputDecision
 
 from conftest import make_movie
 
 
-class TestMovieNightWorkflowBasic:
-    def test_workflow_movies_happy_path_with_finder(
-        self, mock_orchestrator, mock_movies_responder, mock_system_responder, stub_movie_finder
-    ):
-        mock_orchestrator.decide.return_value = OrchestratorDecision(
-            intent="movies",
-            constraints=Constraints(genres=["action"]),
-            needs_clarification=False,
-        )
-
-        workflow = MovieNightWorkflow(
-            mock_orchestrator, mock_movies_responder, mock_system_responder,
-            movie_finder=stub_movie_finder,
-        )
-        result = workflow.invoke("Recommend action movies")
-
-        assert result["route"] == "movies"
-        assert len(result["candidate_movies"]) > 0
-        assert "final_response" in result
-
-    def test_workflow_movies_without_finder_shows_no_results(
-        self, mock_orchestrator, mock_movies_responder, mock_system_responder
-    ):
-        mock_orchestrator.decide.return_value = OrchestratorDecision(
-            intent="movies",
-            constraints=Constraints(genres=["action"]),
-            needs_clarification=False,
-        )
-
-        workflow = MovieNightWorkflow(
-            mock_orchestrator, mock_movies_responder, mock_system_responder
-        )
-        result = workflow.invoke("Recommend action movies")
-
-        assert result["route"] == "movies"
-        assert result["candidate_movies"] == []
-        assert "couldn't find" in result["final_response"].lower()
-
-    def test_workflow_system_happy_path(
-        self, mock_orchestrator, mock_movies_responder, mock_system_responder
-    ):
-        mock_orchestrator.decide.return_value = OrchestratorDecision(
-            intent="system",
-            constraints=Constraints(),
-            needs_clarification=False,
-        )
-        mock_system_responder.respond.return_value = "I help you find movies."
-
-        workflow = MovieNightWorkflow(
-            mock_orchestrator, mock_movies_responder, mock_system_responder
-        )
-        result = workflow.invoke("How do you work?")
-
-        assert result["route"] == "system"
-        assert result["final_response"] == "I help you find movies."
-
-    def test_workflow_clarification_path(
-        self, mock_orchestrator, mock_movies_responder, mock_system_responder
-    ):
-        mock_orchestrator.decide.return_value = OrchestratorDecision(
-            intent="movies",
-            constraints=Constraints(),
-            needs_clarification=True,
-            clarification_question="What mood are you in?",
-        )
-
-        workflow = MovieNightWorkflow(
-            mock_orchestrator, mock_movies_responder, mock_system_responder
-        )
-        result = workflow.invoke("something")
-
-        assert result["route"] == "clarification"
-        assert result["final_response"] == "What mood are you in?"
-        mock_movies_responder.respond.assert_not_called()
-        mock_system_responder.respond.assert_not_called()
-
-    def test_get_response_extracts_fields(
-        self, mock_orchestrator, mock_movies_responder, mock_system_responder, stub_movie_finder
-    ):
-        mock_orchestrator.decide.return_value = OrchestratorDecision(
-            intent="movies",
-            constraints=Constraints(genres=["horror"], max_runtime_minutes=120),
-            needs_clarification=False,
-        )
-
-        workflow = MovieNightWorkflow(
-            mock_orchestrator, mock_movies_responder, mock_system_responder,
-            movie_finder=stub_movie_finder,
-        )
-        reply, route, constraints = workflow.get_response("Short horror movie")
-
-        assert route == "movies"
-        assert constraints.genres == ["horror"]
-        assert constraints.max_runtime_minutes == 120
-        assert reply is not None
-
-    def test_get_response_raises_on_no_response(
-        self, mock_orchestrator, mock_movies_responder, mock_system_responder, mock_movie_finder
-    ):
-        mock_orchestrator.decide.return_value = OrchestratorDecision(
-            intent="movies",
-            constraints=Constraints(),
-            needs_clarification=False,
-        )
-        mock_movie_finder.find_movies.return_value = []
-
-        workflow = MovieNightWorkflow(
-            mock_orchestrator, mock_movies_responder, mock_system_responder,
-            movie_finder=mock_movie_finder,
-        )
-        reply, route, constraints = workflow.get_response("Test")
-
-        assert "couldn't find" in reply.lower()
-
-
 class TestMovieNightWorkflowWithInputAgent:
     def test_workflow_movies_with_input_agent(
-        self, mock_input_agent, mock_movies_responder, mock_system_responder, stub_movie_finder
+        self, mock_input_agent, mock_system_responder, stub_movie_finder
     ):
         mock_input_agent.decide.return_value = InputDecision(
             route="movies",
@@ -137,8 +22,6 @@ class TestMovieNightWorkflowWithInputAgent:
         )
 
         workflow = MovieNightWorkflow(
-            orchestrator=None,
-            movies_responder=mock_movies_responder,
             system_responder=mock_system_responder,
             input_agent=mock_input_agent,
             movie_finder=stub_movie_finder,
@@ -151,7 +34,7 @@ class TestMovieNightWorkflowWithInputAgent:
         assert len(result["candidate_movies"]) > 0
 
     def test_workflow_rag_with_input_agent(
-        self, mock_input_agent, mock_movies_responder, mock_system_responder
+        self, mock_input_agent, mock_system_responder
     ):
         mock_input_agent.decide.return_value = InputDecision(
             route="rag",
@@ -163,8 +46,6 @@ class TestMovieNightWorkflowWithInputAgent:
         mock_system_responder.respond.return_value = "This app helps you find movies."
 
         workflow = MovieNightWorkflow(
-            orchestrator=None,
-            movies_responder=mock_movies_responder,
             system_responder=mock_system_responder,
             input_agent=mock_input_agent,
         )
@@ -176,7 +57,7 @@ class TestMovieNightWorkflowWithInputAgent:
         assert result["rag_query"] == "How does the app work?"
 
     def test_workflow_hybrid_with_input_agent(
-        self, mock_input_agent, mock_movies_responder, mock_system_responder, stub_movie_finder
+        self, mock_input_agent, mock_system_responder, stub_movie_finder
     ):
         mock_input_agent.decide.return_value = InputDecision(
             route="hybrid",
@@ -187,8 +68,6 @@ class TestMovieNightWorkflowWithInputAgent:
         )
 
         workflow = MovieNightWorkflow(
-            orchestrator=None,
-            movies_responder=mock_movies_responder,
             system_responder=mock_system_responder,
             input_agent=mock_input_agent,
             movie_finder=stub_movie_finder,
@@ -202,7 +81,7 @@ class TestMovieNightWorkflowWithInputAgent:
         assert len(result["candidate_movies"]) > 0
 
     def test_workflow_clarification_with_input_agent(
-        self, mock_input_agent, mock_movies_responder, mock_system_responder
+        self, mock_input_agent, mock_system_responder
     ):
         mock_input_agent.decide.return_value = InputDecision(
             route="movies",
@@ -214,8 +93,6 @@ class TestMovieNightWorkflowWithInputAgent:
         )
 
         workflow = MovieNightWorkflow(
-            orchestrator=None,
-            movies_responder=mock_movies_responder,
             system_responder=mock_system_responder,
             input_agent=mock_input_agent,
         )
@@ -223,22 +100,19 @@ class TestMovieNightWorkflowWithInputAgent:
 
         assert result["route"] == "clarification"
         assert result["final_response"] == "What mood are you in?"
-        mock_movies_responder.respond.assert_not_called()
         mock_system_responder.respond.assert_not_called()
 
-    def test_workflow_requires_orchestrator_or_input_agent(
-        self, mock_movies_responder, mock_system_responder
+    def test_workflow_requires_input_agent(
+        self, mock_system_responder
     ):
-        with pytest.raises(ValueError, match="Either orchestrator or input_agent"):
+        with pytest.raises(ValueError, match="input_agent must be provided"):
             MovieNightWorkflow(
-                orchestrator=None,
-                movies_responder=mock_movies_responder,
                 system_responder=mock_system_responder,
                 input_agent=None,
             )
 
     def test_get_response_with_input_agent(
-        self, mock_input_agent, mock_movies_responder, mock_system_responder
+        self, mock_input_agent, mock_system_responder
     ):
         mock_input_agent.decide.return_value = InputDecision(
             route="rag",
@@ -250,8 +124,6 @@ class TestMovieNightWorkflowWithInputAgent:
         mock_system_responder.respond.return_value = "This app helps you find movies."
 
         workflow = MovieNightWorkflow(
-            orchestrator=None,
-            movies_responder=mock_movies_responder,
             system_responder=mock_system_responder,
             input_agent=mock_input_agent,
         )
@@ -263,7 +135,7 @@ class TestMovieNightWorkflowWithInputAgent:
 
 class TestMovieNightWorkflowWithMovieFinder:
     def test_workflow_movies_with_finder(
-        self, mock_input_agent, mock_movies_responder, mock_system_responder, mock_movie_finder
+        self, mock_input_agent, mock_system_responder, mock_movie_finder
     ):
         mock_input_agent.decide.return_value = InputDecision(
             route="movies",
@@ -285,8 +157,6 @@ class TestMovieNightWorkflowWithMovieFinder:
         ]
 
         workflow = MovieNightWorkflow(
-            orchestrator=None,
-            movies_responder=mock_movies_responder,
             system_responder=mock_system_responder,
             input_agent=mock_input_agent,
             movie_finder=mock_movie_finder,
@@ -300,7 +170,7 @@ class TestMovieNightWorkflowWithMovieFinder:
         mock_movie_finder.find_movies.assert_called_once()
 
     def test_workflow_hybrid_with_finder(
-        self, mock_input_agent, mock_movies_responder, mock_system_responder, mock_movie_finder
+        self, mock_input_agent, mock_system_responder, mock_movie_finder
     ):
         mock_input_agent.decide.return_value = InputDecision(
             route="hybrid",
@@ -322,8 +192,6 @@ class TestMovieNightWorkflowWithMovieFinder:
         ]
 
         workflow = MovieNightWorkflow(
-            orchestrator=None,
-            movies_responder=mock_movies_responder,
             system_responder=mock_system_responder,
             input_agent=mock_input_agent,
             movie_finder=mock_movie_finder,
@@ -336,7 +204,7 @@ class TestMovieNightWorkflowWithMovieFinder:
         mock_movie_finder.find_movies.assert_called_once()
 
     def test_workflow_rag_skips_finder(
-        self, mock_input_agent, mock_movies_responder, mock_system_responder, mock_movie_finder
+        self, mock_input_agent, mock_system_responder, mock_movie_finder
     ):
         mock_input_agent.decide.return_value = InputDecision(
             route="rag",
@@ -348,8 +216,6 @@ class TestMovieNightWorkflowWithMovieFinder:
         mock_system_responder.respond.return_value = "This app helps you find movies."
 
         workflow = MovieNightWorkflow(
-            orchestrator=None,
-            movies_responder=mock_movies_responder,
             system_responder=mock_system_responder,
             input_agent=mock_input_agent,
             movie_finder=mock_movie_finder,
@@ -361,7 +227,7 @@ class TestMovieNightWorkflowWithMovieFinder:
         mock_movie_finder.find_movies.assert_not_called()
 
     def test_workflow_with_stub_finder_integration(
-        self, mock_input_agent, mock_movies_responder, mock_system_responder, stub_movie_finder
+        self, mock_input_agent, mock_system_responder, stub_movie_finder
     ):
         mock_input_agent.decide.return_value = InputDecision(
             route="movies",
@@ -372,8 +238,6 @@ class TestMovieNightWorkflowWithMovieFinder:
         )
 
         workflow = MovieNightWorkflow(
-            orchestrator=None,
-            movies_responder=mock_movies_responder,
             system_responder=mock_system_responder,
             input_agent=mock_input_agent,
             movie_finder=stub_movie_finder,
@@ -386,7 +250,7 @@ class TestMovieNightWorkflowWithMovieFinder:
             assert any("horror" in g.lower() for g in movie.genres)
 
     def test_workflow_empty_finder_results(
-        self, mock_input_agent, mock_movies_responder, mock_system_responder, mock_movie_finder
+        self, mock_input_agent, mock_system_responder, mock_movie_finder
     ):
         mock_input_agent.decide.return_value = InputDecision(
             route="movies",
@@ -398,8 +262,6 @@ class TestMovieNightWorkflowWithMovieFinder:
         mock_movie_finder.find_movies.return_value = []
 
         workflow = MovieNightWorkflow(
-            orchestrator=None,
-            movies_responder=mock_movies_responder,
             system_responder=mock_system_responder,
             input_agent=mock_input_agent,
             movie_finder=mock_movie_finder,
@@ -411,7 +273,7 @@ class TestMovieNightWorkflowWithMovieFinder:
         assert "couldn't find" in result["final_response"].lower()
 
     def test_workflow_clarification_skips_finder(
-        self, mock_input_agent, mock_movies_responder, mock_system_responder, mock_movie_finder
+        self, mock_input_agent, mock_system_responder, mock_movie_finder
     ):
         mock_input_agent.decide.return_value = InputDecision(
             route="movies",
@@ -423,8 +285,6 @@ class TestMovieNightWorkflowWithMovieFinder:
         )
 
         workflow = MovieNightWorkflow(
-            orchestrator=None,
-            movies_responder=mock_movies_responder,
             system_responder=mock_system_responder,
             input_agent=mock_input_agent,
             movie_finder=mock_movie_finder,
@@ -440,7 +300,6 @@ class TestMovieNightWorkflowWithRecommendationWriter:
     def test_movies_path_uses_writer_draft_text(
         self,
         mock_input_agent,
-        mock_movies_responder,
         mock_system_responder,
         mock_movie_finder,
         stub_recommendation_writer,
@@ -472,8 +331,6 @@ class TestMovieNightWorkflowWithRecommendationWriter:
         ]
 
         workflow = MovieNightWorkflow(
-            orchestrator=None,
-            movies_responder=mock_movies_responder,
             system_responder=mock_system_responder,
             input_agent=mock_input_agent,
             movie_finder=mock_movie_finder,
@@ -490,7 +347,6 @@ class TestMovieNightWorkflowWithRecommendationWriter:
     def test_hybrid_path_also_runs_writer(
         self,
         mock_input_agent,
-        mock_movies_responder,
         mock_system_responder,
         mock_movie_finder,
         stub_recommendation_writer,
@@ -513,8 +369,6 @@ class TestMovieNightWorkflowWithRecommendationWriter:
         ]
 
         workflow = MovieNightWorkflow(
-            orchestrator=None,
-            movies_responder=mock_movies_responder,
             system_responder=mock_system_responder,
             input_agent=mock_input_agent,
             movie_finder=mock_movie_finder,
@@ -530,7 +384,6 @@ class TestMovieNightWorkflowWithRecommendationWriter:
     def test_writer_skipped_when_no_candidates(
         self,
         mock_input_agent,
-        mock_movies_responder,
         mock_system_responder,
         mock_movie_finder,
         stub_recommendation_writer,
@@ -545,8 +398,6 @@ class TestMovieNightWorkflowWithRecommendationWriter:
         mock_movie_finder.find_movies.return_value = []
 
         workflow = MovieNightWorkflow(
-            orchestrator=None,
-            movies_responder=mock_movies_responder,
             system_responder=mock_system_responder,
             input_agent=mock_input_agent,
             movie_finder=mock_movie_finder,
@@ -562,7 +413,6 @@ class TestMovieNightWorkflowWithRecommendationWriter:
     def test_rejected_titles_are_respected_by_writer(
         self,
         mock_input_agent,
-        mock_movies_responder,
         mock_system_responder,
         mock_movie_finder,
         stub_recommendation_writer,
@@ -580,8 +430,6 @@ class TestMovieNightWorkflowWithRecommendationWriter:
         ]
 
         workflow = MovieNightWorkflow(
-            orchestrator=None,
-            movies_responder=mock_movies_responder,
             system_responder=mock_system_responder,
             input_agent=mock_input_agent,
             movie_finder=mock_movie_finder,
@@ -612,7 +460,6 @@ class TestMovieNightWorkflowWithRecommendationWriter:
     def test_rag_route_skips_writer(
         self,
         mock_input_agent,
-        mock_movies_responder,
         mock_system_responder,
         mock_movie_finder,
         mock_recommendation_writer,
@@ -627,8 +474,6 @@ class TestMovieNightWorkflowWithRecommendationWriter:
         mock_system_responder.respond.return_value = "This app helps you find movies."
 
         workflow = MovieNightWorkflow(
-            orchestrator=None,
-            movies_responder=mock_movies_responder,
             system_responder=mock_system_responder,
             input_agent=mock_input_agent,
             movie_finder=mock_movie_finder,
@@ -643,7 +488,6 @@ class TestMovieNightWorkflowWithRecommendationWriter:
     def test_get_response_returns_grounded_text(
         self,
         mock_input_agent,
-        mock_movies_responder,
         mock_system_responder,
         stub_movie_finder,
         stub_recommendation_writer,
@@ -657,8 +501,6 @@ class TestMovieNightWorkflowWithRecommendationWriter:
         )
 
         workflow = MovieNightWorkflow(
-            orchestrator=None,
-            movies_responder=mock_movies_responder,
             system_responder=mock_system_responder,
             input_agent=mock_input_agent,
             movie_finder=stub_movie_finder,

@@ -5,13 +5,13 @@ from unittest.mock import MagicMock
 import pytest
 from langchain_openai import AzureChatOpenAI
 
-from app.llm.candidate_selector import detect_constraint_violations
-from app.llm.evaluator_agent import (
+from app.workflow.candidate_selector import detect_constraint_violations
+from app.agents.evaluator_agent import (
     LLMEvaluatorAgent,
     StubEvaluatorAgent,
 )
 from app.schemas.domain import DraftRecommendation, EvaluationResult, MovieResult
-from app.schemas.orchestrator import Constraints
+from app.schemas.input import Constraints
 
 
 def _movie(
@@ -272,7 +272,7 @@ class TestThresholdIntegration:
     """Verify pass/fail integrates with PASS_THRESHOLD at workflow level."""
 
     def test_score_above_threshold_with_passed_flag_accepted(self):
-        from app.llm.state import PASS_THRESHOLD
+        from app.workflow.state import PASS_THRESHOLD
 
         result = EvaluationResult(
             passed=True, score=0.9, feedback="ok"
@@ -280,7 +280,7 @@ class TestThresholdIntegration:
         assert result.passed and result.score >= PASS_THRESHOLD
 
     def test_score_below_threshold_rejected(self):
-        from app.llm.state import PASS_THRESHOLD
+        from app.workflow.state import PASS_THRESHOLD
 
         result = EvaluationResult(
             passed=True, score=0.5, feedback="weak"
@@ -288,7 +288,7 @@ class TestThresholdIntegration:
         assert not (result.passed and result.score >= PASS_THRESHOLD)
 
     def test_passed_false_rejected_even_with_high_score(self):
-        from app.llm.state import PASS_THRESHOLD
+        from app.workflow.state import PASS_THRESHOLD
 
         result = EvaluationResult(
             passed=False, score=0.95, feedback="nope"

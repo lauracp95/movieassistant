@@ -7,12 +7,17 @@ import pytest
 # Add the api/ directory to sys.path so "import app" works reliably
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from app.agents import MoviesResponder, OrchestratorAgent, SystemResponder
-from app.llm.evaluator_agent import EvaluatorAgent, StubEvaluatorAgent
-from app.llm.input_agent import InputOrchestratorAgent
-from app.llm.movie_finder_agent import MovieFinderAgent, StubMovieFinderAgent
-from app.llm.rag_agent import RAGAssistantAgent, StubRAGAssistantAgent
-from app.llm.recommendation_agent import (
+from app.agents import (
+    EvaluatorAgent,
+    InputOrchestratorAgent,
+    MovieFinderAgent,
+    RAGAssistantAgent,
+    StubEvaluatorAgent,
+    StubMovieFinderAgent,
+    StubRAGAssistantAgent,
+    SystemResponder,
+)
+from app.agents.recommendation_agent import (
     RecommendationWriterAgent,
     StubRecommendationWriterAgent,
 )
@@ -21,18 +26,8 @@ from app.schemas.domain import MovieResult
 
 
 @pytest.fixture
-def mock_orchestrator():
-    return MagicMock(spec=OrchestratorAgent)
-
-
-@pytest.fixture
 def mock_input_agent():
     return MagicMock(spec=InputOrchestratorAgent)
-
-
-@pytest.fixture
-def mock_movies_responder():
-    return MagicMock(spec=MoviesResponder)
 
 
 @pytest.fixture

@@ -2,7 +2,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
 
-from app.schemas.orchestrator import Constraints
+from app.schemas.input import Constraints
 
 
 class ChatRequest(BaseModel):

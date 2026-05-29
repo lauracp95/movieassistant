@@ -5,19 +5,23 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from pydantic import ValidationError
 
-from app.agents import MoviesResponder, SystemResponder
-from app.api.routes import cleanup_workflow, initialize_workflow, router
+from app.agents import (
+    InputOrchestratorAgent,
+    LLMEvaluatorAgent,
+    LLMRAGAssistantAgent,
+    LLMRecommendationWriterAgent,
+    MovieFinderAgent,
+    StubMovieFinderAgent,
+    SystemResponder,
+    TMDBMovieFinderAgent,
+)
+from app.routers.routes import cleanup_workflow, initialize_workflow, router
 from app.integrations.tmdb_client import TMDBClient
-from app.llm import StubMovieFinderAgent, TMDBMovieFinderAgent, create_chat_model
-from app.llm.evaluator_agent import LLMEvaluatorAgent
-from app.llm.input_agent import InputOrchestratorAgent
-from app.llm.movie_finder_agent import MovieFinderAgent
-from app.llm.rag_agent import LLMRAGAssistantAgent
-from app.llm.recommendation_agent import LLMRecommendationWriterAgent
-from app.llm.workflow import MovieNightWorkflow
+from app.llm import create_chat_model
 from app.observability import configure_langsmith, get_tracing_status
 from app.rag.retriever import create_retriever
 from app.settings import Settings, get_settings
+from app.workflow import MovieNightWorkflow
 
 logging.basicConfig(
     level=os.getenv("LOG_LEVEL", "INFO"),
@@ -85,7 +89,6 @@ async def lifespan(app: FastAPI):
         rag_llm = create_chat_model(settings, temperature=0.3)
 
         input_agent = InputOrchestratorAgent(input_agent_llm)
-        movies_responder = MoviesResponder(llm)
         system_responder = SystemResponder(llm)
         movie_finder = create_movie_finder(settings)
         recommendation_writer = LLMRecommendationWriterAgent(writer_llm)
@@ -98,8 +101,6 @@ async def lifespan(app: FastAPI):
         )
 
         workflow = MovieNightWorkflow(
-            orchestrator=None,
-            movies_responder=movies_responder,
             system_responder=system_responder,
             input_agent=input_agent,
             movie_finder=movie_finder,

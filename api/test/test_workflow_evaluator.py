@@ -1,9 +1,9 @@
 """Integration tests for MovieNightWorkflow evaluator functionality."""
 
-from app.llm.state import MAX_RETRIES
-from app.llm.workflow import RETRY_EXHAUSTED_FALLBACK_MESSAGE, MovieNightWorkflow
+from app.workflow.state import MAX_RETRIES
+from app.workflow import RETRY_EXHAUSTED_FALLBACK_MESSAGE, MovieNightWorkflow
 from app.schemas.domain import EvaluationResult
-from app.schemas.orchestrator import Constraints, InputDecision
+from app.schemas.input import Constraints, InputDecision
 
 from conftest import make_movie
 
@@ -12,7 +12,6 @@ class TestMovieNightWorkflowWithEvaluator:
     def test_happy_path_passes_on_first_try(
         self,
         mock_input_agent,
-        mock_movies_responder,
         mock_system_responder,
         mock_movie_finder,
         stub_recommendation_writer,
@@ -37,8 +36,6 @@ class TestMovieNightWorkflowWithEvaluator:
         ]
 
         workflow = MovieNightWorkflow(
-            orchestrator=None,
-            movies_responder=mock_movies_responder,
             system_responder=mock_system_responder,
             input_agent=mock_input_agent,
             movie_finder=mock_movie_finder,
@@ -59,7 +56,6 @@ class TestMovieNightWorkflowWithEvaluator:
     def test_retry_loop_succeeds_after_first_fail(
         self,
         mock_input_agent,
-        mock_movies_responder,
         mock_system_responder,
         mock_movie_finder,
         stub_recommendation_writer,
@@ -100,8 +96,6 @@ class TestMovieNightWorkflowWithEvaluator:
         ]
 
         workflow = MovieNightWorkflow(
-            orchestrator=None,
-            movies_responder=mock_movies_responder,
             system_responder=mock_system_responder,
             input_agent=mock_input_agent,
             movie_finder=mock_movie_finder,
@@ -122,7 +116,6 @@ class TestMovieNightWorkflowWithEvaluator:
     def test_retry_loop_stops_at_max_retries_and_returns_fallback(
         self,
         mock_input_agent,
-        mock_movies_responder,
         mock_system_responder,
         mock_movie_finder,
         stub_recommendation_writer,
@@ -151,8 +144,6 @@ class TestMovieNightWorkflowWithEvaluator:
         )
 
         workflow = MovieNightWorkflow(
-            orchestrator=None,
-            movies_responder=mock_movies_responder,
             system_responder=mock_system_responder,
             input_agent=mock_input_agent,
             movie_finder=mock_movie_finder,
@@ -170,7 +161,6 @@ class TestMovieNightWorkflowWithEvaluator:
     def test_retry_loop_stops_when_writer_runs_out_of_candidates(
         self,
         mock_input_agent,
-        mock_movies_responder,
         mock_system_responder,
         mock_movie_finder,
         stub_recommendation_writer,
@@ -198,8 +188,6 @@ class TestMovieNightWorkflowWithEvaluator:
         )
 
         workflow = MovieNightWorkflow(
-            orchestrator=None,
-            movies_responder=mock_movies_responder,
             system_responder=mock_system_responder,
             input_agent=mock_input_agent,
             movie_finder=mock_movie_finder,
@@ -216,7 +204,6 @@ class TestMovieNightWorkflowWithEvaluator:
     def test_rag_route_skips_evaluator(
         self,
         mock_input_agent,
-        mock_movies_responder,
         mock_system_responder,
         mock_movie_finder,
         stub_recommendation_writer,
@@ -232,8 +219,6 @@ class TestMovieNightWorkflowWithEvaluator:
         mock_system_responder.respond.return_value = "This app helps you find movies."
 
         workflow = MovieNightWorkflow(
-            orchestrator=None,
-            movies_responder=mock_movies_responder,
             system_responder=mock_system_responder,
             input_agent=mock_input_agent,
             movie_finder=mock_movie_finder,
@@ -249,7 +234,6 @@ class TestMovieNightWorkflowWithEvaluator:
     def test_clarification_skips_evaluator(
         self,
         mock_input_agent,
-        mock_movies_responder,
         mock_system_responder,
         mock_movie_finder,
         stub_recommendation_writer,
@@ -265,8 +249,6 @@ class TestMovieNightWorkflowWithEvaluator:
         )
 
         workflow = MovieNightWorkflow(
-            orchestrator=None,
-            movies_responder=mock_movies_responder,
             system_responder=mock_system_responder,
             input_agent=mock_input_agent,
             movie_finder=mock_movie_finder,
@@ -282,7 +264,6 @@ class TestMovieNightWorkflowWithEvaluator:
     def test_no_candidates_skips_evaluator(
         self,
         mock_input_agent,
-        mock_movies_responder,
         mock_system_responder,
         mock_movie_finder,
         stub_recommendation_writer,
@@ -298,8 +279,6 @@ class TestMovieNightWorkflowWithEvaluator:
         mock_movie_finder.find_movies.return_value = []
 
         workflow = MovieNightWorkflow(
-            orchestrator=None,
-            movies_responder=mock_movies_responder,
             system_responder=mock_system_responder,
             input_agent=mock_input_agent,
             movie_finder=mock_movie_finder,
@@ -316,7 +295,6 @@ class TestMovieNightWorkflowWithEvaluator:
     def test_get_response_returns_fallback_when_retries_exhausted(
         self,
         mock_input_agent,
-        mock_movies_responder,
         mock_system_responder,
         mock_movie_finder,
         stub_recommendation_writer,
@@ -344,8 +322,6 @@ class TestMovieNightWorkflowWithEvaluator:
         )
 
         workflow = MovieNightWorkflow(
-            orchestrator=None,
-            movies_responder=mock_movies_responder,
             system_responder=mock_system_responder,
             input_agent=mock_input_agent,
             movie_finder=mock_movie_finder,

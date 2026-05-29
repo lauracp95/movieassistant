@@ -10,9 +10,9 @@ These tests verify that:
 import pytest
 from unittest.mock import MagicMock, patch
 
-from app.schemas.orchestrator import Constraints, MovieSearchQuery
+from app.schemas.input import Constraints, MovieSearchQuery
 from app.schemas.domain import MovieResult
-from app.llm.movie_finder_agent import (
+from app.agents.movie_finder_agent import (
     StubMovieFinderAgent,
     TMDBMovieFinderAgent,
     LANGUAGE_NAME_TO_CODE,

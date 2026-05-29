@@ -5,13 +5,13 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from app.integrations.tmdb_client import TMDBClient, TMDBClientError
-from app.llm.movie_finder_agent import (
+from app.agents.movie_finder_agent import (
     MovieFinderAgent,
     StubMovieFinderAgent,
     TMDBMovieFinderAgent,
 )
 from app.schemas.domain import MovieResult
-from app.schemas.orchestrator import Constraints
+from app.schemas.input import Constraints
 
 
 class TestStubMovieFinderAgent:

@@ -4,8 +4,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from app.llm.input_agent import InputOrchestratorAgent
-from app.schemas.orchestrator import Constraints, InputDecision
+from app.agents.input_agent import InputOrchestratorAgent
+from app.schemas.input import Constraints, InputDecision
 
 
 @pytest.fixture

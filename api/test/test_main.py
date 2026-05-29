@@ -3,13 +3,15 @@ from unittest.mock import MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
-from app.agents import MoviesResponder, SystemResponder
-from app.llm.evaluator_agent import StubEvaluatorAgent
-from app.llm.input_agent import InputOrchestratorAgent
-from app.llm.movie_finder_agent import StubMovieFinderAgent
-from app.llm.rag_agent import StubRAGAssistantAgent
-from app.llm.recommendation_agent import StubRecommendationWriterAgent
-from app.llm.workflow import MovieNightWorkflow
+from app.agents import (
+    InputOrchestratorAgent,
+    StubEvaluatorAgent,
+    StubMovieFinderAgent,
+    StubRAGAssistantAgent,
+    StubRecommendationWriterAgent,
+    SystemResponder,
+)
+from app.workflow import MovieNightWorkflow
 from app.main import app
 from app.rag.retriever import create_retriever
 from app.schemas import Constraints
@@ -19,7 +21,7 @@ from app.schemas.domain import (
     MovieResult,
     RetrievedContext,
 )
-from app.schemas.orchestrator import InputDecision
+from app.schemas.input import InputDecision
 
 
 @pytest.fixture
@@ -62,7 +64,7 @@ def test_chat_movies_route():
         "rag_query": None,
     }
 
-    with patch("app.api.routes.workflow", mock_workflow):
+    with patch("app.routers.routes.workflow", mock_workflow):
         client = TestClient(app, raise_server_exceptions=False)
         r = client.post("/chat", json={"message": "Recommend a comedy movie"})
 
@@ -88,7 +90,7 @@ def test_chat_rag_route():
         "rag_query": "How does this app work?",
     }
 
-    with patch("app.api.routes.workflow", mock_workflow):
+    with patch("app.routers.routes.workflow", mock_workflow):
         client = TestClient(app, raise_server_exceptions=False)
         r = client.post("/chat", json={"message": "How does this app work?"})
 
@@ -113,7 +115,7 @@ def test_chat_hybrid_route():
         "rag_query": "History of Halloween horror movies",
     }
 
-    with patch("app.api.routes.workflow", mock_workflow):
+    with patch("app.routers.routes.workflow", mock_workflow):
         client = TestClient(app, raise_server_exceptions=False)
         r = client.post("/chat", json={"message": "Horror movies for Halloween and their history"})
 
@@ -139,7 +141,7 @@ def test_chat_system_route_maps_to_rag():
         "rag_query": None,
     }
 
-    with patch("app.api.routes.workflow", mock_workflow):
+    with patch("app.routers.routes.workflow", mock_workflow):
         client = TestClient(app, raise_server_exceptions=False)
         r = client.post("/chat", json={"message": "How does this app work?"})
 
@@ -163,7 +165,7 @@ def test_chat_needs_clarification():
         "rag_query": None,
     }
 
-    with patch("app.api.routes.workflow", mock_workflow):
+    with patch("app.routers.routes.workflow", mock_workflow):
         client = TestClient(app, raise_server_exceptions=False)
         r = client.post("/chat", json={"message": "help"})
 
@@ -177,7 +179,7 @@ def test_chat_workflow_error():
     mock_workflow = MagicMock(spec=MovieNightWorkflow)
     mock_workflow.invoke.side_effect = Exception("Workflow error")
 
-    with patch("app.api.routes.workflow", mock_workflow):
+    with patch("app.routers.routes.workflow", mock_workflow):
         client = TestClient(app, raise_server_exceptions=False)
         r = client.post("/chat", json={"message": "Hello"})
 
@@ -186,7 +188,7 @@ def test_chat_workflow_error():
 
 
 def test_chat_workflow_not_initialized():
-    with patch("app.api.routes.workflow", None):
+    with patch("app.routers.routes.workflow", None):
         client = TestClient(app, raise_server_exceptions=False)
         r = client.post("/chat", json={"message": "Hello"})
 
@@ -208,7 +210,7 @@ def test_chat_constraints_with_runtime():
         "rag_query": None,
     }
 
-    with patch("app.api.routes.workflow", mock_workflow):
+    with patch("app.routers.routes.workflow", mock_workflow):
         client = TestClient(app, raise_server_exceptions=False)
         r = client.post("/chat", json={"message": "Short comedy movie please"})
 
@@ -263,7 +265,7 @@ class TestDebugInfo:
             "rag_query": None,
         }
 
-        with patch("app.api.routes.workflow", mock_workflow):
+        with patch("app.routers.routes.workflow", mock_workflow):
             client = TestClient(app, raise_server_exceptions=False)
             r = client.post("/chat", json={"message": "Recommend a sci-fi movie"})
 
@@ -294,7 +296,7 @@ class TestDebugInfo:
             "rag_query": None,
         }
 
-        with patch("app.api.routes.workflow", mock_workflow):
+        with patch("app.routers.routes.workflow", mock_workflow):
             client = TestClient(app, raise_server_exceptions=False)
             r = client.post("/chat", json={"message": "Action movie"})
 
@@ -318,7 +320,7 @@ class TestDebugInfo:
             "rag_query": "How does the Movie Night Assistant work?",
         }
 
-        with patch("app.api.routes.workflow", mock_workflow):
+        with patch("app.routers.routes.workflow", mock_workflow):
             client = TestClient(app, raise_server_exceptions=False)
             r = client.post("/chat", json={"message": "How does this work?"})
 
@@ -342,12 +344,9 @@ class TestIntegrationWithStubAgents:
             rag_query=None,
         )
 
-        mock_movies_responder = MagicMock(spec=MoviesResponder)
         mock_system_responder = MagicMock(spec=SystemResponder)
 
         return MovieNightWorkflow(
-            orchestrator=None,
-            movies_responder=mock_movies_responder,
             system_responder=mock_system_responder,
             input_agent=mock_input_agent,
             movie_finder=StubMovieFinderAgent(),
@@ -367,14 +366,11 @@ class TestIntegrationWithStubAgents:
             rag_query="How does the system work?",
         )
 
-        mock_movies_responder = MagicMock(spec=MoviesResponder)
         mock_system_responder = MagicMock(spec=SystemResponder)
 
         rag_retriever = create_retriever()
 
         return MovieNightWorkflow(
-            orchestrator=None,
-            movies_responder=mock_movies_responder,
             system_responder=mock_system_responder,
             input_agent=mock_input_agent,
             movie_finder=StubMovieFinderAgent(),
@@ -396,14 +392,11 @@ class TestIntegrationWithStubAgents:
             rag_query="History of horror films",
         )
 
-        mock_movies_responder = MagicMock(spec=MoviesResponder)
         mock_system_responder = MagicMock(spec=SystemResponder)
 
         rag_retriever = create_retriever()
 
         return MovieNightWorkflow(
-            orchestrator=None,
-            movies_responder=mock_movies_responder,
             system_responder=mock_system_responder,
             input_agent=mock_input_agent,
             movie_finder=StubMovieFinderAgent(),
@@ -415,7 +408,7 @@ class TestIntegrationWithStubAgents:
 
     def test_movies_route_integration(self, stub_workflow_movies):
         """Test complete movies route with stub agents."""
-        with patch("app.api.routes.workflow", stub_workflow_movies):
+        with patch("app.routers.routes.workflow", stub_workflow_movies):
             client = TestClient(app, raise_server_exceptions=False)
             r = client.post("/chat", json={"message": "Recommend a comedy"})
 
@@ -428,7 +421,7 @@ class TestIntegrationWithStubAgents:
 
     def test_rag_route_integration(self, stub_workflow_rag):
         """Test complete RAG route with stub agents."""
-        with patch("app.api.routes.workflow", stub_workflow_rag):
+        with patch("app.routers.routes.workflow", stub_workflow_rag):
             client = TestClient(app, raise_server_exceptions=False)
             r = client.post("/chat", json={"message": "How does this work?"})
 
@@ -441,7 +434,7 @@ class TestIntegrationWithStubAgents:
 
     def test_hybrid_route_integration(self, stub_workflow_hybrid):
         """Test complete hybrid route with stub agents."""
-        with patch("app.api.routes.workflow", stub_workflow_hybrid):
+        with patch("app.routers.routes.workflow", stub_workflow_hybrid):
             client = TestClient(app, raise_server_exceptions=False)
             r = client.post("/chat", json={"message": "Horror movies and history"})
 
@@ -454,14 +447,14 @@ class TestIntegrationWithStubAgents:
 
     def test_health_endpoint_always_works(self, stub_workflow_movies):
         """Test health endpoint works regardless of workflow state."""
-        with patch("app.api.routes.workflow", stub_workflow_movies):
+        with patch("app.routers.routes.workflow", stub_workflow_movies):
             client = TestClient(app, raise_server_exceptions=False)
             r = client.get("/health")
 
             assert r.status_code == 200
             assert r.json() == {"status": "ok"}
 
-        with patch("app.api.routes.workflow", None):
+        with patch("app.routers.routes.workflow", None):
             client = TestClient(app, raise_server_exceptions=False)
             r = client.get("/health")
 

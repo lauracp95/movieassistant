@@ -6,7 +6,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from app.llm.rag_agent import (
+from app.agents.rag_agent import (
     LLMRAGAssistantAgent,
     RAGAssistantAgent,
     StubRAGAssistantAgent,

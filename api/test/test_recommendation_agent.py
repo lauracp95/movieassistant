@@ -5,16 +5,18 @@ from unittest.mock import MagicMock
 import pytest
 from langchain_openai import AzureChatOpenAI
 
-from app.llm.recommendation_agent import (
+from app.agents.recommendation_agent import (
     LLMRecommendationWriterAgent,
     StubRecommendationWriterAgent,
+)
+from app.workflow.candidate_selector import (
     build_reasoning,
     filter_candidates,
     prioritize_candidates,
     select_best_candidate,
 )
 from app.schemas.domain import DraftRecommendation, MovieResult
-from app.schemas.orchestrator import Constraints
+from app.schemas.input import Constraints
 
 
 def _movie(
