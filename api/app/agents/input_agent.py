@@ -1,7 +1,6 @@
 """InputOrchestratorAgent for the Movie Night Assistant.
 
-This module provides the Phase 2 input agent that handles richer routing
-classification with support for movies, rag, and hybrid routes.
+Classifies user messages and extracts constraints for movies, rag, and hybrid routes.
 """
 
 import logging
@@ -19,7 +18,6 @@ logger = logging.getLogger(__name__)
 class InputOrchestratorAgent:
     """Input Orchestrator Agent that classifies routes and extracts constraints.
 
-    This agent provides Phase 2 routing capabilities:
     - Classifies requests as movies, rag, or hybrid
     - Extracts movie constraints (genres, runtime)
     - Detects clarification needs

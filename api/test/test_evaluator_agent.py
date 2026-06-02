@@ -1,4 +1,4 @@
-"""Unit tests for the EvaluatorAgent (Phase 5)."""
+"""Unit tests for the EvaluatorAgent."""
 
 from unittest.mock import MagicMock
 

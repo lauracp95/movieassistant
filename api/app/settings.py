@@ -4,19 +4,26 @@ from pydantic import Field
 
 
 class Settings(BaseSettings):
-    """Configuration settings for Azure OpenAI and external APIs.
-    
+    """Configuration settings for Azure OpenAI, external APIs, and observability.
+
     Required environment variables:
         - AZURE_OPENAI_ENDPOINT: Azure OpenAI resource endpoint
         - AZURE_OPENAI_API_KEY: Azure OpenAI API key
         - AZURE_OPENAI_API_VERSION: API version (e.g., 2024-02-15-preview)
         - AZURE_OPENAI_DEPLOYMENT: Deployment name of the chat model
-    
+
     Optional:
         - TEMPERATURE: Model temperature (default: 0.7)
         - MAX_TOKENS: Maximum tokens in response (optional)
         - TMDB_API_KEY: TMDB API key for movie retrieval (optional, uses stub if not set)
-        - MOVIE_FINDER_MODE: "tmdb" or "stub" (default: auto-detect based on API key)
+        - MOVIE_FINDER_MODE: "tmdb", "stub", or "auto" (default: auto)
+
+    Optional (LangSmith tracing; both LANGCHAIN_TRACING_V2 and LANGCHAIN_API_KEY
+    must be set for tracing to activate — see langsmith_enabled):
+        - LANGCHAIN_TRACING_V2: Enable tracing (default: false)
+        - LANGCHAIN_API_KEY: LangSmith API key
+        - LANGCHAIN_PROJECT: Project name in LangSmith UI (default: movie-night-assistant)
+        - LANGCHAIN_ENDPOINT: LangSmith API endpoint (default: https://api.smith.langchain.com)
     """
     
     # Field(...) = required, no default → app crashes if missing

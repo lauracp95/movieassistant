@@ -72,7 +72,7 @@ class TestMovieNightState:
         state["route"] = "clarification"
         assert state["route"] == "clarification"
 
-    def test_state_supports_new_phase2_fields(self):
+    def test_state_supports_rag_routing_fields(self):
         state: MovieNightState = create_initial_state("Test")
 
         state["needs_recommendation"] = True

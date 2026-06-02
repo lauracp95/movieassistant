@@ -12,11 +12,8 @@ from unittest.mock import MagicMock, patch
 
 from app.schemas.input import Constraints, MovieSearchQuery
 from app.schemas.domain import MovieResult
-from app.agents.movie_finder_agent import (
-    StubMovieFinderAgent,
-    TMDBMovieFinderAgent,
-    LANGUAGE_NAME_TO_CODE,
-)
+from app.agents import StubMovieFinderAgent, TMDBMovieFinderAgent
+from app.agents.tmdb_movie_finder_agent import LANGUAGE_NAME_TO_CODE
 
 
 class TestMovieSearchQuerySchema:

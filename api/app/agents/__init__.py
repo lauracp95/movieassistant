@@ -16,11 +16,9 @@ from app.agents.evaluator_agent import (
     StubEvaluatorAgent,
 )
 from app.agents.input_agent import InputOrchestratorAgent
-from app.agents.movie_finder_agent import (
-    MovieFinderAgent,
-    StubMovieFinderAgent,
-    TMDBMovieFinderAgent,
-)
+from app.agents.movie_finder_agent import MovieFinderAgent
+from app.agents.stub_movie_finder_agent import StubMovieFinderAgent
+from app.agents.tmdb_movie_finder_agent import TMDBMovieFinderAgent
 from app.agents.rag_agent import (
     LLMRAGAssistantAgent,
     RAGAssistantAgent,

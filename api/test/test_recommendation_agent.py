@@ -1,4 +1,4 @@
-"""Unit tests for the RecommendationWriterAgent (Phase 4)."""
+"""Unit tests for the RecommendationWriterAgent."""
 
 from unittest.mock import MagicMock
 

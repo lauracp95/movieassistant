@@ -14,6 +14,7 @@ A chat assistant for planning movie nights, powered by Azure OpenAI via LangChai
 - **Evaluator Agent**: Validates drafts against constraints and quality criteria; on failure the workflow retries (up to `MAX_RETRIES`) and accumulates **rejected titles** so the writer avoids repeating bad picks; exhausted retries yield a safe fallback message
 - **RAG Assistant Agent**: Answers system questions using retrieved documentation from the knowledge base
 - **Document Retriever**: TF-IDF based retrieval over markdown knowledge base files
+- **LangSmith** (optional): Traces LLM calls and `/chat` workflow runs when `LANGCHAIN_TRACING_V2` and `LANGCHAIN_API_KEY` are set
 
 ## How It Works
 
@@ -45,6 +46,12 @@ A chat assistant for planning movie nights, powered by Azure OpenAI via LangChai
 | `LOG_LEVEL` | ❌ | Logging level (default: INFO) | `DEBUG` |
 | `TMDB_API_KEY` | ❌ | TMDB API key for movie data (uses stub if not set) | `abc123...` |
 | `MOVIE_FINDER_MODE` | ❌ | Movie finder mode: `auto`, `tmdb`, or `stub` (default: auto) | `auto` |
+| `LANGCHAIN_TRACING_V2` | ❌ | Enable LangSmith tracing (default: false) | `true` |
+| `LANGCHAIN_API_KEY` | ❌ | LangSmith API key (required when tracing is enabled) | `lsv2_...` |
+| `LANGCHAIN_PROJECT` | ❌ | LangSmith project name (default: `movie-night-assistant`) | `movie-night-assistant` |
+| `LANGCHAIN_ENDPOINT` | ❌ | LangSmith API endpoint | `https://api.smith.langchain.com` |
+
+Tracing is active only when `LANGCHAIN_TRACING_V2=true` **and** `LANGCHAIN_API_KEY` is set (see `api/app/settings.py` and `api/app/observability/langsmith.py`).
 
 ## Setup Environment Variables
 
@@ -216,7 +223,9 @@ The production app wires `LLMEvaluatorAgent` in `api/app/main.py` after the reco
 │   │   │   ├── client.py         # Azure OpenAI model factory
 │   │   │   ├── evaluator_agent.py # Draft validator (stub + LLM)
 │   │   │   ├── input_agent.py    # Route classifier (movies/rag/hybrid)
-│   │   │   ├── movie_finder_agent.py # Movie retrieval (Stub, TMDB)
+│   │   │   ├── movie_finder_agent.py      # MovieFinderAgent contract
+│   │   │   ├── stub_movie_finder_agent.py # In-memory finder (tests)
+│   │   │   ├── tmdb_movie_finder_agent.py # TMDB finder
 │   │   │   ├── rag_agent.py      # RAG assistant for knowledge queries
 │   │   │   ├── recommendation_agent.py # Grounded recommendation writer
 │   │   │   ├── prompts.py        # System prompts for all agents
