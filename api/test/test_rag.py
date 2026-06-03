@@ -6,11 +6,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from app.agents.rag_agent import (
-    LLMRAGAssistantAgent,
-    RAGAssistantAgent,
-    StubRAGAssistantAgent,
-)
+from app.agents.rag_agent import LLMRAGAssistantAgent, RAGAssistantAgent
 from app.rag.ingest import (
     DEFAULT_CHUNK_SIZE,
     DocumentIngester,
@@ -235,48 +231,6 @@ class TestDocumentRetriever:
 
             assert retriever._initialized
             assert len(retriever._documents) >= 1
-
-
-class TestStubRAGAssistantAgent:
-    def test_answer_with_no_contexts(self):
-        agent = StubRAGAssistantAgent()
-        answer = agent.answer("How does this work?", contexts=[])
-
-        assert "don't have specific information" in answer.lower()
-
-    def test_answer_with_contexts(self):
-        agent = StubRAGAssistantAgent()
-        contexts = [
-            RetrievedContext(
-                content="System overview content",
-                source="rag",
-                relevance_score=0.9,
-                metadata={"title": "System Overview"},
-            ),
-        ]
-
-        answer = agent.answer("How does this work?", contexts)
-
-        assert "knowledge base" in answer.lower()
-        assert "System Overview" in answer
-
-    def test_answer_includes_context_count(self):
-        agent = StubRAGAssistantAgent()
-        contexts = [
-            RetrievedContext(
-                content="Content 1",
-                source="rag",
-                metadata={"title": "Doc 1"},
-            ),
-            RetrievedContext(
-                content="Content 2",
-                source="rag",
-                metadata={"title": "Doc 2"},
-            ),
-        ]
-
-        answer = agent.answer("question", contexts)
-        assert "2" in answer
 
 
 class TestLLMRAGAssistantAgent:

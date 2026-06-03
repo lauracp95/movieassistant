@@ -11,7 +11,6 @@ Responsibilities:
 
 Implementations:
     - :class:`RecommendationWriterAgent`: abstract base
-    - :class:`StubRecommendationWriterAgent`: deterministic, LLM-free
     - :class:`LLMRecommendationWriterAgent`: deterministic selection + LLM text
 """
 
@@ -39,7 +38,6 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     "RecommendationWriterAgent",
-    "StubRecommendationWriterAgent",
     "LLMRecommendationWriterAgent",
 ]
 
@@ -71,41 +69,6 @@ class RecommendationWriterAgent(ABC):
             A valid :class:`DraftRecommendation`, or ``None`` if no
             candidate could be selected (caller should handle gracefully).
         """
-
-
-class StubRecommendationWriterAgent(RecommendationWriterAgent):
-    """Deterministic, LLM-free writer suitable for tests and offline mode.
-
-    Uses :func:`select_best_candidate` for selection and
-    :func:`build_deterministic_recommendation_text` for the natural-language
-    explanation.
-    """
-
-    def write(
-        self,
-        user_message: str,
-        constraints: Constraints,
-        candidates: list[MovieResult],
-        rejected_titles: list[str] | None = None,
-    ) -> DraftRecommendation | None:
-        logger.info(
-            "StubRecommendationWriter composing draft "
-            f"(candidates={len(candidates)}, rejected={len(rejected_titles or [])})"
-        )
-
-        movie = select_best_candidate(candidates, constraints, rejected_titles)
-        if movie is None:
-            logger.info("StubRecommendationWriter: no candidate survived filtering")
-            return None
-
-        text = build_deterministic_recommendation_text(movie, constraints)
-        reasoning = build_reasoning(movie, constraints)
-
-        return DraftRecommendation(
-            movie=movie,
-            recommendation_text=text,
-            reasoning=reasoning,
-        )
 
 
 class LLMRecommendationWriterAgent(RecommendationWriterAgent):

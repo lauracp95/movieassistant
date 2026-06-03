@@ -6,10 +6,7 @@ import pytest
 from langchain_openai import AzureChatOpenAI
 
 from app.workflow.candidate_selector import detect_constraint_violations
-from app.agents.evaluator_agent import (
-    LLMEvaluatorAgent,
-    StubEvaluatorAgent,
-)
+from app.agents.evaluator_agent import LLMEvaluatorAgent
 from app.schemas.domain import DraftRecommendation, EvaluationResult, MovieResult
 from app.schemas.input import Constraints
 
@@ -90,9 +87,22 @@ class TestDetectConstraintViolations:
         assert any("empty" in v for v in violations)
 
 
-class TestStubEvaluator:
-    def test_passes_clean_draft(self):
-        evaluator = StubEvaluatorAgent(default_score=0.9)
+class TestLLMEvaluatorDeterministicPrecheck:
+    def _evaluator(self) -> tuple[LLMEvaluatorAgent, MagicMock]:
+        llm = MagicMock(spec=AzureChatOpenAI)
+        structured = MagicMock()
+        llm.with_structured_output.return_value = structured
+        return LLMEvaluatorAgent(llm), structured
+
+    def test_passes_clean_draft_via_llm(self):
+        evaluator, structured = self._evaluator()
+        structured.invoke.return_value = EvaluationResult(
+            passed=True,
+            score=0.9,
+            feedback="Great pick.",
+            constraint_violations=[],
+            improvement_suggestions=[],
+        )
         draft = _draft(_movie("1", "Clean", runtime_minutes=100))
 
         result = evaluator.evaluate(
@@ -105,11 +115,10 @@ class TestStubEvaluator:
         assert isinstance(result, EvaluationResult)
         assert result.passed is True
         assert result.score == 0.9
-        assert result.constraint_violations == []
-        assert result.improvement_suggestions == []
+        structured.invoke.assert_called_once()
 
-    def test_fails_draft_with_runtime_violation(self):
-        evaluator = StubEvaluatorAgent()
+    def test_fails_draft_with_runtime_violation_without_llm(self):
+        evaluator, structured = self._evaluator()
         draft = _draft(_movie("1", "Long", runtime_minutes=200))
 
         result = evaluator.evaluate(
@@ -122,10 +131,11 @@ class TestStubEvaluator:
         assert result.passed is False
         assert result.score == 0.0
         assert len(result.constraint_violations) >= 1
-        assert result.improvement_suggestions  # non-empty
+        assert result.improvement_suggestions
+        structured.invoke.assert_not_called()
 
-    def test_fails_draft_with_rejected_title(self):
-        evaluator = StubEvaluatorAgent()
+    def test_fails_draft_with_rejected_title_without_llm(self):
+        evaluator, structured = self._evaluator()
         draft = _draft(_movie("1", "Already Rejected"))
 
         result = evaluator.evaluate(
@@ -137,9 +147,10 @@ class TestStubEvaluator:
 
         assert result.passed is False
         assert result.score == 0.0
+        structured.invoke.assert_not_called()
 
-    def test_fails_draft_with_empty_text(self):
-        evaluator = StubEvaluatorAgent()
+    def test_fails_draft_with_empty_text_without_llm(self):
+        evaluator, structured = self._evaluator()
         draft = DraftRecommendation(
             movie=_movie("1", "Clean"),
             recommendation_text="",
@@ -153,9 +164,13 @@ class TestStubEvaluator:
         )
 
         assert result.passed is False
+        structured.invoke.assert_not_called()
 
     def test_handles_none_rejected_titles(self):
-        evaluator = StubEvaluatorAgent()
+        evaluator, structured = self._evaluator()
+        structured.invoke.return_value = EvaluationResult(
+            passed=True, score=0.85, feedback="ok"
+        )
         draft = _draft(_movie("1", "Clean"))
 
         result = evaluator.evaluate(

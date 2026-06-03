@@ -2,15 +2,16 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
+from langchain_openai import AzureChatOpenAI
 
 from app.agents import (
     InputOrchestratorAgent,
-    StubEvaluatorAgent,
-    StubMovieFinderAgent,
-    StubRAGAssistantAgent,
-    StubRecommendationWriterAgent,
+    LLMEvaluatorAgent,
+    LLMRAGAssistantAgent,
+    InMemoryMovieFinderAgent,
     SystemResponder,
 )
+from app.agents.recommendation_agent import LLMRecommendationWriterAgent
 from app.workflow import MovieNightWorkflow
 from app.main import app
 from app.rag.retriever import create_retriever
@@ -329,12 +330,33 @@ class TestDebugInfo:
             assert data["debug"]["rag_query"] == "How does the Movie Night Assistant work?"
 
 
-class TestIntegrationWithStubAgents:
-    """Integration tests using stub agents to exercise full workflow paths."""
+class TestIntegrationWithMockedLLM:
+    """Integration tests with mocked LLM agents to exercise full workflow paths."""
+
+    @staticmethod
+    def _writer_and_evaluator():
+        writer_llm = MagicMock(spec=AzureChatOpenAI)
+        writer_llm.invoke.return_value = MagicMock(
+            content="A great pick for your movie night."
+        )
+        writer = LLMRecommendationWriterAgent(writer_llm)
+
+        evaluator_llm = MagicMock(spec=AzureChatOpenAI)
+        structured = MagicMock()
+        structured.invoke.return_value = EvaluationResult(
+            passed=True,
+            score=0.85,
+            feedback="ok",
+            constraint_violations=[],
+            improvement_suggestions=[],
+        )
+        evaluator_llm.with_structured_output.return_value = structured
+        evaluator = LLMEvaluatorAgent(evaluator_llm)
+        return writer, evaluator
 
     @pytest.fixture
-    def stub_workflow_movies(self):
-        """Create a workflow with stub agents for movies route testing."""
+    def offline_workflow_movies(self):
+        """Workflow for movies route testing without live LLM or TMDB."""
         mock_input_agent = MagicMock(spec=InputOrchestratorAgent)
         mock_input_agent.decide.return_value = InputDecision(
             route="movies",
@@ -345,18 +367,19 @@ class TestIntegrationWithStubAgents:
         )
 
         mock_system_responder = MagicMock(spec=SystemResponder)
+        writer, evaluator = self._writer_and_evaluator()
 
         return MovieNightWorkflow(
             system_responder=mock_system_responder,
             input_agent=mock_input_agent,
-            movie_finder=StubMovieFinderAgent(),
-            recommendation_writer=StubRecommendationWriterAgent(),
-            evaluator=StubEvaluatorAgent(),
+            movie_finder=InMemoryMovieFinderAgent(),
+            recommendation_writer=writer,
+            evaluator=evaluator,
         )
 
     @pytest.fixture
-    def stub_workflow_rag(self):
-        """Create a workflow with stub agents for RAG route testing."""
+    def offline_workflow_rag(self):
+        """Workflow for RAG route testing without live LLM or TMDB."""
         mock_input_agent = MagicMock(spec=InputOrchestratorAgent)
         mock_input_agent.decide.return_value = InputDecision(
             route="rag",
@@ -367,22 +390,29 @@ class TestIntegrationWithStubAgents:
         )
 
         mock_system_responder = MagicMock(spec=SystemResponder)
+        writer, evaluator = self._writer_and_evaluator()
 
-        rag_retriever = create_retriever()
+        rag_llm = MagicMock(spec=AzureChatOpenAI)
+        rag_llm.invoke.return_value = MagicMock(
+            content=(
+                "Based on my knowledge base, here is how the "
+                "Movie Night Assistant works."
+            )
+        )
 
         return MovieNightWorkflow(
             system_responder=mock_system_responder,
             input_agent=mock_input_agent,
-            movie_finder=StubMovieFinderAgent(),
-            recommendation_writer=StubRecommendationWriterAgent(),
-            evaluator=StubEvaluatorAgent(),
-            rag_retriever=rag_retriever,
-            rag_agent=StubRAGAssistantAgent(),
+            movie_finder=InMemoryMovieFinderAgent(),
+            recommendation_writer=writer,
+            evaluator=evaluator,
+            rag_retriever=create_retriever(),
+            rag_agent=LLMRAGAssistantAgent(rag_llm),
         )
 
     @pytest.fixture
-    def stub_workflow_hybrid(self):
-        """Create a workflow with stub agents for hybrid route testing."""
+    def offline_workflow_hybrid(self):
+        """Workflow for hybrid route testing without live LLM or TMDB."""
         mock_input_agent = MagicMock(spec=InputOrchestratorAgent)
         mock_input_agent.decide.return_value = InputDecision(
             route="hybrid",
@@ -393,22 +423,26 @@ class TestIntegrationWithStubAgents:
         )
 
         mock_system_responder = MagicMock(spec=SystemResponder)
+        writer, evaluator = self._writer_and_evaluator()
 
-        rag_retriever = create_retriever()
+        rag_llm = MagicMock(spec=AzureChatOpenAI)
+        rag_llm.invoke.return_value = MagicMock(
+            content="Horror films often build tension through atmosphere."
+        )
 
         return MovieNightWorkflow(
             system_responder=mock_system_responder,
             input_agent=mock_input_agent,
-            movie_finder=StubMovieFinderAgent(),
-            recommendation_writer=StubRecommendationWriterAgent(),
-            evaluator=StubEvaluatorAgent(),
-            rag_retriever=rag_retriever,
-            rag_agent=StubRAGAssistantAgent(),
+            movie_finder=InMemoryMovieFinderAgent(),
+            recommendation_writer=writer,
+            evaluator=evaluator,
+            rag_retriever=create_retriever(),
+            rag_agent=LLMRAGAssistantAgent(rag_llm),
         )
 
-    def test_movies_route_integration(self, stub_workflow_movies):
-        """Test complete movies route with stub agents."""
-        with patch("app.routers.routes.workflow", stub_workflow_movies):
+    def test_movies_route_integration(self, offline_workflow_movies):
+        """Test complete movies route without live LLM or TMDB."""
+        with patch("app.routers.routes.workflow", offline_workflow_movies):
             client = TestClient(app, raise_server_exceptions=False)
             r = client.post("/chat", json={"message": "Recommend a comedy"})
 
@@ -419,9 +453,9 @@ class TestIntegrationWithStubAgents:
             assert data["extracted_constraints"]["genres"] == ["comedy"]
             assert data["debug"]["selected_movie"] is not None
 
-    def test_rag_route_integration(self, stub_workflow_rag):
-        """Test complete RAG route with stub agents."""
-        with patch("app.routers.routes.workflow", stub_workflow_rag):
+    def test_rag_route_integration(self, offline_workflow_rag):
+        """Test complete RAG route without live LLM."""
+        with patch("app.routers.routes.workflow", offline_workflow_rag):
             client = TestClient(app, raise_server_exceptions=False)
             r = client.post("/chat", json={"message": "How does this work?"})
 
@@ -432,9 +466,9 @@ class TestIntegrationWithStubAgents:
             assert "knowledge base" in data["reply"].lower()
             assert data["debug"]["rag_query"] == "How does the system work?"
 
-    def test_hybrid_route_integration(self, stub_workflow_hybrid):
-        """Test complete hybrid route with stub agents."""
-        with patch("app.routers.routes.workflow", stub_workflow_hybrid):
+    def test_hybrid_route_integration(self, offline_workflow_hybrid):
+        """Test complete hybrid route without live LLM."""
+        with patch("app.routers.routes.workflow", offline_workflow_hybrid):
             client = TestClient(app, raise_server_exceptions=False)
             r = client.post("/chat", json={"message": "Horror movies and history"})
 
@@ -445,9 +479,9 @@ class TestIntegrationWithStubAgents:
             assert data["extracted_constraints"]["genres"] == ["horror"]
             assert data["debug"]["rag_query"] == "History of horror films"
 
-    def test_health_endpoint_always_works(self, stub_workflow_movies):
+    def test_health_endpoint_always_works(self, offline_workflow_movies):
         """Test health endpoint works regardless of workflow state."""
-        with patch("app.routers.routes.workflow", stub_workflow_movies):
+        with patch("app.routers.routes.workflow", offline_workflow_movies):
             client = TestClient(app, raise_server_exceptions=False)
             r = client.get("/health")
 

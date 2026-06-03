@@ -195,7 +195,7 @@ def build_deterministic_recommendation_text(
 ) -> str:
     """Build a plain-text recommendation grounded strictly in the movie data.
 
-    Used by the stub writer and as a safe fallback if the LLM fails.
+    Used as a safe fallback if the recommendation writer LLM call fails.
     This function produces consistent, deterministic output without any
     LLM involvement.
 

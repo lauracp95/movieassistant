@@ -3,6 +3,7 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
+from langchain_openai import AzureChatOpenAI
 
 # Add the api/ directory to sys.path so "import app" works reliably
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -10,19 +11,19 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from app.agents import (
     EvaluatorAgent,
     InputOrchestratorAgent,
+    LLMEvaluatorAgent,
+    LLMRAGAssistantAgent,
     MovieFinderAgent,
     RAGAssistantAgent,
-    StubEvaluatorAgent,
-    StubMovieFinderAgent,
-    StubRAGAssistantAgent,
+    InMemoryMovieFinderAgent,
     SystemResponder,
 )
 from app.agents.recommendation_agent import (
+    LLMRecommendationWriterAgent,
     RecommendationWriterAgent,
-    StubRecommendationWriterAgent,
 )
 from app.rag.retriever import DocumentRetriever
-from app.schemas.domain import MovieResult
+from app.schemas.domain import EvaluationResult, MovieResult
 
 
 @pytest.fixture
@@ -41,8 +42,8 @@ def mock_movie_finder():
 
 
 @pytest.fixture
-def stub_movie_finder():
-    return StubMovieFinderAgent()
+def in_memory_movie_finder():
+    return InMemoryMovieFinderAgent()
 
 
 @pytest.fixture
@@ -51,8 +52,17 @@ def mock_recommendation_writer():
 
 
 @pytest.fixture
-def stub_recommendation_writer():
-    return StubRecommendationWriterAgent()
+def recommendation_writer_llm():
+    llm = MagicMock(spec=AzureChatOpenAI)
+    llm.invoke.return_value = MagicMock(
+        content="A great pick for your movie night."
+    )
+    return llm
+
+
+@pytest.fixture
+def llm_recommendation_writer(recommendation_writer_llm):
+    return LLMRecommendationWriterAgent(recommendation_writer_llm)
 
 
 @pytest.fixture
@@ -61,8 +71,23 @@ def mock_evaluator():
 
 
 @pytest.fixture
-def stub_evaluator():
-    return StubEvaluatorAgent()
+def evaluator_llm():
+    llm = MagicMock(spec=AzureChatOpenAI)
+    structured = MagicMock()
+    structured.invoke.return_value = EvaluationResult(
+        passed=True,
+        score=0.85,
+        feedback="Draft satisfies hard constraints.",
+        constraint_violations=[],
+        improvement_suggestions=[],
+    )
+    llm.with_structured_output.return_value = structured
+    return llm
+
+
+@pytest.fixture
+def llm_evaluator(evaluator_llm):
+    return LLMEvaluatorAgent(evaluator_llm)
 
 
 @pytest.fixture
@@ -76,8 +101,20 @@ def mock_rag_agent():
 
 
 @pytest.fixture
-def stub_rag_agent():
-    return StubRAGAssistantAgent()
+def rag_agent_llm():
+    llm = MagicMock(spec=AzureChatOpenAI)
+    llm.invoke.return_value = MagicMock(
+        content=(
+            "Based on my knowledge base, I can help answer "
+            "questions about how the Movie Night Assistant works."
+        )
+    )
+    return llm
+
+
+@pytest.fixture
+def llm_rag_agent(rag_agent_llm):
+    return LLMRAGAssistantAgent(rag_agent_llm)
 
 
 def make_movie(

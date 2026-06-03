@@ -1,4 +1,4 @@
-"""In-memory movie finder for tests and local development."""
+"""In-memory movie finder for local development without TMDB."""
 
 from __future__ import annotations
 
@@ -11,146 +11,148 @@ from app.schemas.input import Constraints, MovieSearchQuery
 logger = logging.getLogger(__name__)
 
 
-class StubMovieFinderAgent(MovieFinderAgent):
+class InMemoryMovieFinderAgent(MovieFinderAgent):
     """Returns predictable movie data without external API calls."""
 
-    STUB_MOVIES: list[MovieResult] = [
+    IN_MEMORY_MOVIES: list[MovieResult] = [
         MovieResult(
-            id="stub-1",
+            id="inmemory-1",
             title="The Matrix",
             year=1999,
             genres=["Action", "Sci-Fi"],
             runtime_minutes=136,
             overview="A computer hacker learns about the true nature of reality.",
             rating=8.7,
-            source="stub",
+            source="inmemory",
             cast=["Keanu Reeves", "Laurence Fishburne", "Carrie-Anne Moss"],
             director="Lana Wachowski",
         ),
         MovieResult(
-            id="stub-2",
+            id="inmemory-2",
             title="Inception",
             year=2010,
             genres=["Action", "Sci-Fi", "Thriller"],
             runtime_minutes=148,
             overview="A thief who enters dreams to steal secrets.",
             rating=8.8,
-            source="stub",
+            source="inmemory",
             cast=["Leonardo DiCaprio", "Joseph Gordon-Levitt", "Ellen Page"],
             director="Christopher Nolan",
         ),
         MovieResult(
-            id="stub-3",
+            id="inmemory-3",
             title="The Conjuring",
             year=2013,
             genres=["Horror", "Mystery", "Thriller"],
             runtime_minutes=112,
             overview="Paranormal investigators help a family terrorized by a dark presence.",
             rating=7.5,
-            source="stub",
+            source="inmemory",
             cast=["Vera Farmiga", "Patrick Wilson"],
             director="James Wan",
         ),
         MovieResult(
-            id="stub-4",
+            id="inmemory-4",
             title="Superbad",
             year=2007,
             genres=["Comedy"],
             runtime_minutes=113,
             overview="Two co-dependent high school seniors must separate for college.",
             rating=7.6,
-            source="stub",
+            source="inmemory",
             cast=["Jonah Hill", "Michael Cera", "Seth Rogen"],
             director="Greg Mottola",
         ),
         MovieResult(
-            id="stub-5",
+            id="inmemory-5",
             title="The Notebook",
             year=2004,
             genres=["Drama", "Romance"],
             runtime_minutes=123,
             overview="A poor yet passionate young man falls in love with a rich young woman.",
             rating=7.8,
-            source="stub",
+            source="inmemory",
             cast=["Ryan Gosling", "Rachel McAdams"],
             director="Nick Cassavetes",
         ),
         MovieResult(
-            id="stub-6",
+            id="inmemory-6",
             title="Blade Runner 2049",
             year=2017,
             genres=["Action", "Drama", "Sci-Fi"],
             runtime_minutes=164,
             overview="A young blade runner uncovers a long-buried secret.",
             rating=8.0,
-            source="stub",
+            source="inmemory",
             cast=["Ryan Gosling", "Harrison Ford", "Ana de Armas"],
             director="Denis Villeneuve",
         ),
         MovieResult(
-            id="stub-7",
+            id="inmemory-7",
             title="Get Out",
             year=2017,
             genres=["Horror", "Mystery", "Thriller"],
             runtime_minutes=104,
             overview="A young Black man visits his white girlfriend's family estate.",
             rating=7.7,
-            source="stub",
+            source="inmemory",
             cast=["Daniel Kaluuya", "Allison Williams"],
             director="Jordan Peele",
         ),
         MovieResult(
-            id="stub-8",
+            id="inmemory-8",
             title="The Grand Budapest Hotel",
             year=2014,
             genres=["Adventure", "Comedy", "Crime"],
             runtime_minutes=99,
             overview="A concierge and his lobby boy are caught up in a murder mystery.",
             rating=8.1,
-            source="stub",
+            source="inmemory",
             cast=["Ralph Fiennes", "Tony Revolori", "Saoirse Ronan"],
             director="Wes Anderson",
         ),
         MovieResult(
-            id="stub-9",
+            id="inmemory-9",
             title="Girl, Interrupted",
             year=1999,
             genres=["Drama"],
             runtime_minutes=127,
             overview="A young woman with depression is admitted to a psychiatric hospital.",
             rating=7.3,
-            source="stub",
+            source="inmemory",
             cast=["Winona Ryder", "Angelina Jolie"],
             director="James Mangold",
         ),
         MovieResult(
-            id="stub-10",
+            id="inmemory-10",
             title="Interstellar",
             year=2014,
             genres=["Adventure", "Drama", "Sci-Fi"],
             runtime_minutes=169,
             overview="A team of explorers travel through a wormhole in space.",
             rating=8.6,
-            source="stub",
+            source="inmemory",
             cast=["Matthew McConaughey", "Anne Hathaway", "Jessica Chastain"],
             director="Christopher Nolan",
         ),
         MovieResult(
-            id="stub-11",
+            id="inmemory-11",
             title="The Silence of the Lambs",
             year=1991,
             genres=["Thriller", "Crime", "Drama"],
             runtime_minutes=118,
             overview="A young FBI cadet must receive the help of an incarcerated cannibal killer.",
             rating=8.6,
-            source="stub",
+            source="inmemory",
             cast=["Jodie Foster", "Anthony Hopkins"],
             director="Jonathan Demme",
         ),
     ]
 
     def __init__(self, custom_movies: list[MovieResult] | None = None) -> None:
-        self._movies = custom_movies if custom_movies is not None else self.STUB_MOVIES
+        self._movies = (
+            custom_movies if custom_movies is not None else self.IN_MEMORY_MOVIES
+        )
 
     def find_movies(
         self,
@@ -159,9 +161,11 @@ class StubMovieFinderAgent(MovieFinderAgent):
         excluded_titles: list[str] | None = None,
         search_query: MovieSearchQuery | None = None,
     ) -> list[MovieResult]:
-        logger.info(f"StubMovieFinder searching with constraints: {constraints}")
+        logger.info(f"InMemoryMovieFinder searching with constraints: {constraints}")
         if search_query:
-            logger.info(f"StubMovieFinder search_query: {search_query.model_dump_json()}")
+            logger.info(
+                f"InMemoryMovieFinder search_query: {search_query.model_dump_json()}"
+            )
 
         excluded = set(t.lower() for t in (excluded_titles or []))
 
@@ -181,7 +185,7 @@ class StubMovieFinderAgent(MovieFinderAgent):
             if len(results) >= limit:
                 break
 
-        logger.info(f"StubMovieFinder found {len(results)} movies")
+        logger.info(f"InMemoryMovieFinder found {len(results)} movies")
         return results
 
     def _matches_constraints(self, movie: MovieResult, constraints: Constraints) -> bool:

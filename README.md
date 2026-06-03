@@ -1,6 +1,6 @@
 # Movie Night Assistant
 
-A chat assistant for planning movie nights, powered by Azure OpenAI via LangChain. It runs a LangGraph workflow: an input orchestrator classifies the request, a movie finder pulls candidates from TMDB (or a stub), a recommendation writer drafts grounded text, and an evaluator can reject drafts and drive retries while tracking rejected titles.
+A chat assistant for planning movie nights, powered by Azure OpenAI via LangChain. It runs a LangGraph workflow: an input orchestrator classifies the request, a movie finder pulls candidates from TMDB (or an in-memory catalog), a recommendation writer drafts grounded text, and an evaluator can reject drafts and drive retries while tracking rejected titles.
 
 ## Architecture
 
@@ -9,7 +9,7 @@ A chat assistant for planning movie nights, powered by Azure OpenAI via LangChai
 - **LLM**: Azure OpenAI via LangChain (separate model instances for routing, writing, evaluation, and RAG)
 - **Workflow**: LangGraph `StateGraph` (`MovieNightWorkflow`) coordinating nodes and conditional edges
 - **Input Orchestrator Agent**: Routes to `movies`, `rag`, or `hybrid`; extracts constraints; may ask for clarification
-- **Movie Finder Agent**: Retrieves candidate movies from TMDB (or stub data for testing)
+- **Movie Finder Agent**: Retrieves candidate movies from TMDB, or an in-memory catalog when no API key is configured (`InMemoryMovieFinderAgent`)
 - **Recommendation Writer Agent**: Selects a candidate and produces recommendation prose grounded in movie metadata
 - **Evaluator Agent**: Validates drafts against constraints and quality criteria; on failure the workflow retries (up to `MAX_RETRIES`) and accumulates **rejected titles** so the writer avoids repeating bad picks; exhausted retries yield a safe fallback message
 - **RAG Assistant Agent**: Answers system questions using retrieved documentation from the knowledge base
@@ -44,8 +44,8 @@ A chat assistant for planning movie nights, powered by Azure OpenAI via LangChai
 | `TEMPERATURE` | ❌ | Model temperature (default: 0.7) | `0.7` |
 | `MAX_TOKENS` | ❌ | Max response tokens | `1000` |
 | `LOG_LEVEL` | ❌ | Logging level (default: INFO) | `DEBUG` |
-| `TMDB_API_KEY` | ❌ | TMDB API key for movie data (uses stub if not set) | `abc123...` |
-| `MOVIE_FINDER_MODE` | ❌ | Movie finder mode: `auto`, `tmdb`, or `stub` (default: auto) | `auto` |
+| `TMDB_API_KEY` | ❌ | TMDB API key for movie data (uses in-memory catalog if not set) | `abc123...` |
+| `MOVIE_FINDER_MODE` | ❌ | Movie finder mode: `auto`, `tmdb`, or `inmemory` (default: auto) | `auto` |
 | `LANGCHAIN_TRACING_V2` | ❌ | Enable LangSmith tracing (default: false) | `true` |
 | `LANGCHAIN_API_KEY` | ❌ | LangSmith API key (required when tracing is enabled) | `lsv2_...` |
 | `LANGCHAIN_PROJECT` | ❌ | LangSmith project name (default: `movie-night-assistant`) | `movie-night-assistant` |
@@ -93,6 +93,12 @@ uv run pytest
 # On Windows with Git Bash, use:
 uv run python -m pytest
 ```
+
+Tests do not call Azure OpenAI or TMDB by default:
+
+- **Writer, evaluator, and RAG agents**: `unittest.mock.MagicMock` stands in for the LangChain chat model (`api/test/conftest.py` fixtures `llm_recommendation_writer`, `llm_evaluator`, `llm_rag_agent`).
+- **Input orchestrator and system responder**: mocked at the agent interface where the workflow is under test.
+- **Movie finder**: `InMemoryMovieFinderAgent` provides a fixed in-memory catalog (same implementation used when `MOVIE_FINDER_MODE=inmemory` or no `TMDB_API_KEY` in production).
 
 ### Frontend (UI)
 
@@ -192,12 +198,12 @@ With the default startup configuration (`InputOrchestratorAgent`), app questions
 
 ## Workflow configuration
 
-Retry and pass rules live in `api/app/llm/state.py`:
+Retry and pass rules live in `api/app/workflow/state.py`:
 
 - `MAX_RETRIES`: maximum evaluation failures before the safe fallback response
 - `PASS_THRESHOLD`: minimum evaluator score (combined with the evaluator’s `passed` flag) to accept a draft
 
-The production app wires `LLMEvaluatorAgent` in `api/app/main.py` after the recommendation writer. Tests often use `StubEvaluatorAgent` for deterministic behavior.
+The production app wires `LLMRecommendationWriterAgent`, `LLMEvaluatorAgent`, and `LLMRAGAssistantAgent` in `api/app/main.py`. Only the movie finder has a non-LLM fallback (`InMemoryMovieFinderAgent` when TMDB is unavailable).
 
 ## Project Structure
 
@@ -210,27 +216,27 @@ The production app wires `LLMEvaluatorAgent` in `api/app/main.py` after the reco
 │   │   ├── settings.py          # Environment configuration
 │   │   ├── agents/
 │   │   │   ├── __init__.py
-│   │   │   ├── orchestrator.py  # Basic orchestrator (backward compatibility)
-│   │   │   └── responder.py     # Fallback responders
-│   │   ├── api/
-│   │   │   ├── __init__.py
+│   │   │   ├── input_agent.py              # Route classifier (movies/rag/hybrid)
+│   │   │   ├── movie_finder_agent.py       # MovieFinderAgent contract
+│   │   │   ├── in_memory_movie_finder_agent.py  # In-memory catalog (no TMDB key)
+│   │   │   ├── tmdb_movie_finder_agent.py  # TMDB finder
+│   │   │   ├── recommendation_agent.py     # LLM recommendation writer
+│   │   │   ├── evaluator_agent.py          # LLM draft validator
+│   │   │   ├── rag_agent.py                # LLM RAG assistant
+│   │   │   └── system_responder.py         # Fallback responder
+│   │   ├── routers/
 │   │   │   └── routes.py        # /health and /chat endpoints
 │   │   ├── integrations/
-│   │   │   ├── __init__.py
 │   │   │   └── tmdb_client.py   # TMDB API client
 │   │   ├── llm/
-│   │   │   ├── __init__.py
-│   │   │   ├── client.py         # Azure OpenAI model factory
-│   │   │   ├── evaluator_agent.py # Draft validator (stub + LLM)
-│   │   │   ├── input_agent.py    # Route classifier (movies/rag/hybrid)
-│   │   │   ├── movie_finder_agent.py      # MovieFinderAgent contract
-│   │   │   ├── stub_movie_finder_agent.py # In-memory finder (tests)
-│   │   │   ├── tmdb_movie_finder_agent.py # TMDB finder
-│   │   │   ├── rag_agent.py      # RAG assistant for knowledge queries
-│   │   │   ├── recommendation_agent.py # Grounded recommendation writer
-│   │   │   ├── prompts.py        # System prompts for all agents
-│   │   │   ├── state.py          # MovieNightState, MAX_RETRIES, PASS_THRESHOLD
-│   │   │   └── workflow.py       # LangGraph graph, nodes, conditional routing
+│   │   │   ├── client.py        # Azure OpenAI model factory
+│   │   │   └── prompts.py       # System prompts for all agents
+│   │   ├── workflow/
+│   │   │   ├── graph_builder.py # LangGraph MovieNightWorkflow
+│   │   │   ├── nodes.py         # Graph node implementations
+│   │   │   ├── routing.py       # Conditional edges
+│   │   │   ├── state.py         # MovieNightState, MAX_RETRIES, PASS_THRESHOLD
+│   │   │   └── candidate_selector.py # Deterministic selection and constraint checks
 │   │   ├── rag/
 │   │   │   ├── __init__.py
 │   │   │   ├── ingest.py         # Document ingestion and chunking
@@ -258,7 +264,11 @@ The production app wires `LLMEvaluatorAgent` in `api/app/main.py` after the reco
 │   │   ├── test_recommendation_agent.py
 │   │   ├── test_state.py
 │   │   ├── test_tmdb_client.py
-│   │   └── test_workflow.py      # LangGraph and workflow integration tests
+│   │   ├── test_workflow_integration.py
+│   │   ├── test_workflow_evaluator.py
+│   │   ├── test_workflow_rag.py
+│   │   ├── test_workflow_nodes.py
+│   │   └── test_workflow_routing.py
 │   ├── Dockerfile
 │   └── pyproject.toml
 ├── ui/

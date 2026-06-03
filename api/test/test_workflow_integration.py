@@ -11,7 +11,7 @@ from conftest import make_movie
 
 class TestMovieNightWorkflowWithInputAgent:
     def test_workflow_movies_with_input_agent(
-        self, mock_input_agent, mock_system_responder, stub_movie_finder
+        self, mock_input_agent, mock_system_responder, in_memory_movie_finder
     ):
         mock_input_agent.decide.return_value = InputDecision(
             route="movies",
@@ -24,7 +24,7 @@ class TestMovieNightWorkflowWithInputAgent:
         workflow = MovieNightWorkflow(
             system_responder=mock_system_responder,
             input_agent=mock_input_agent,
-            movie_finder=stub_movie_finder,
+            movie_finder=in_memory_movie_finder,
         )
         result = workflow.invoke("Recommend action movies")
 
@@ -57,7 +57,7 @@ class TestMovieNightWorkflowWithInputAgent:
         assert result["rag_query"] == "How does the app work?"
 
     def test_workflow_hybrid_with_input_agent(
-        self, mock_input_agent, mock_system_responder, stub_movie_finder
+        self, mock_input_agent, mock_system_responder, in_memory_movie_finder
     ):
         mock_input_agent.decide.return_value = InputDecision(
             route="hybrid",
@@ -70,7 +70,7 @@ class TestMovieNightWorkflowWithInputAgent:
         workflow = MovieNightWorkflow(
             system_responder=mock_system_responder,
             input_agent=mock_input_agent,
-            movie_finder=stub_movie_finder,
+            movie_finder=in_memory_movie_finder,
         )
         result = workflow.invoke("Horror movies for Halloween and their history")
 
@@ -226,8 +226,8 @@ class TestMovieNightWorkflowWithMovieFinder:
         assert result["final_response"] == "This app helps you find movies."
         mock_movie_finder.find_movies.assert_not_called()
 
-    def test_workflow_with_stub_finder_integration(
-        self, mock_input_agent, mock_system_responder, stub_movie_finder
+    def test_workflow_with_in_memory_finder_integration(
+        self, mock_input_agent, mock_system_responder, in_memory_movie_finder
     ):
         mock_input_agent.decide.return_value = InputDecision(
             route="movies",
@@ -240,7 +240,7 @@ class TestMovieNightWorkflowWithMovieFinder:
         workflow = MovieNightWorkflow(
             system_responder=mock_system_responder,
             input_agent=mock_input_agent,
-            movie_finder=stub_movie_finder,
+            movie_finder=in_memory_movie_finder,
         )
         result = workflow.invoke("Horror movies please")
 
@@ -302,7 +302,7 @@ class TestMovieNightWorkflowWithRecommendationWriter:
         mock_input_agent,
         mock_system_responder,
         mock_movie_finder,
-        stub_recommendation_writer,
+        llm_recommendation_writer,
     ):
         mock_input_agent.decide.return_value = InputDecision(
             route="movies",
@@ -334,14 +334,17 @@ class TestMovieNightWorkflowWithRecommendationWriter:
             system_responder=mock_system_responder,
             input_agent=mock_input_agent,
             movie_finder=mock_movie_finder,
-            recommendation_writer=stub_recommendation_writer,
+            recommendation_writer=llm_recommendation_writer,
         )
         result = workflow.invoke("Recommend a sci-fi movie")
 
         assert result["route"] == "movies"
         assert result["draft_recommendation"] is not None
         assert result["draft_recommendation"].movie.title == "The Matrix"
-        assert "The Matrix" in result["final_response"]
+        assert (
+            result["final_response"]
+            == result["draft_recommendation"].recommendation_text
+        )
         assert "Some Drama" not in result["final_response"]
 
     def test_hybrid_path_also_runs_writer(
@@ -349,7 +352,7 @@ class TestMovieNightWorkflowWithRecommendationWriter:
         mock_input_agent,
         mock_system_responder,
         mock_movie_finder,
-        stub_recommendation_writer,
+        llm_recommendation_writer,
     ):
         mock_input_agent.decide.return_value = InputDecision(
             route="hybrid",
@@ -372,21 +375,24 @@ class TestMovieNightWorkflowWithRecommendationWriter:
             system_responder=mock_system_responder,
             input_agent=mock_input_agent,
             movie_finder=mock_movie_finder,
-            recommendation_writer=stub_recommendation_writer,
+            recommendation_writer=llm_recommendation_writer,
         )
         result = workflow.invoke("Horror movies and their history")
 
         assert result["route"] == "hybrid"
         assert result["draft_recommendation"] is not None
         assert result["draft_recommendation"].movie.title == "Get Out"
-        assert "Get Out" in result["final_response"]
+        assert (
+            result["final_response"]
+            == result["draft_recommendation"].recommendation_text
+        )
 
     def test_writer_skipped_when_no_candidates(
         self,
         mock_input_agent,
         mock_system_responder,
         mock_movie_finder,
-        stub_recommendation_writer,
+        llm_recommendation_writer,
     ):
         mock_input_agent.decide.return_value = InputDecision(
             route="movies",
@@ -401,7 +407,7 @@ class TestMovieNightWorkflowWithRecommendationWriter:
             system_responder=mock_system_responder,
             input_agent=mock_input_agent,
             movie_finder=mock_movie_finder,
-            recommendation_writer=stub_recommendation_writer,
+            recommendation_writer=llm_recommendation_writer,
         )
         result = workflow.invoke("Recommend nonexistent genre movies")
 
@@ -415,7 +421,7 @@ class TestMovieNightWorkflowWithRecommendationWriter:
         mock_input_agent,
         mock_system_responder,
         mock_movie_finder,
-        stub_recommendation_writer,
+        llm_recommendation_writer,
     ):
         mock_input_agent.decide.return_value = InputDecision(
             route="movies",
@@ -433,7 +439,7 @@ class TestMovieNightWorkflowWithRecommendationWriter:
             system_responder=mock_system_responder,
             input_agent=mock_input_agent,
             movie_finder=mock_movie_finder,
-            recommendation_writer=stub_recommendation_writer,
+            recommendation_writer=llm_recommendation_writer,
         )
 
         initial_state = {
@@ -489,8 +495,8 @@ class TestMovieNightWorkflowWithRecommendationWriter:
         self,
         mock_input_agent,
         mock_system_responder,
-        stub_movie_finder,
-        stub_recommendation_writer,
+        in_memory_movie_finder,
+        llm_recommendation_writer,
     ):
         mock_input_agent.decide.return_value = InputDecision(
             route="movies",
@@ -503,8 +509,8 @@ class TestMovieNightWorkflowWithRecommendationWriter:
         workflow = MovieNightWorkflow(
             system_responder=mock_system_responder,
             input_agent=mock_input_agent,
-            movie_finder=stub_movie_finder,
-            recommendation_writer=stub_recommendation_writer,
+            movie_finder=in_memory_movie_finder,
+            recommendation_writer=llm_recommendation_writer,
         )
 
         reply, route, constraints = workflow.get_response("Recommend a comedy")

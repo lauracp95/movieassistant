@@ -12,7 +12,6 @@ not rewrite drafts. Its sole responsibility is to judge.
 
 Implementations:
     - :class:`EvaluatorAgent`: abstract base
-    - :class:`StubEvaluatorAgent`: deterministic, LLM-free
     - :class:`LLMEvaluatorAgent`: LLM-judged evaluation with structured output
 
 The workflow consults :data:`app.workflow.state.PASS_THRESHOLD` to determine the
@@ -62,61 +61,6 @@ class EvaluatorAgent(ABC):
         Returns:
             A valid :class:`EvaluationResult`.
         """
-
-
-class StubEvaluatorAgent(EvaluatorAgent):
-    """Deterministic, LLM-free evaluator suitable for tests and offline mode.
-
-    The stub evaluates purely mechanically:
-        - hard constraint violations → fail with score 0.0
-        - empty recommendation text → fail with score 0.0
-        - otherwise pass with a modest score
-    """
-
-    def __init__(self, default_score: float = 0.85) -> None:
-        """Initialize the stub evaluator.
-
-        Args:
-            default_score: Score assigned to drafts that have no detected
-                hard constraint violations.
-        """
-        self._default_score = default_score
-
-    def evaluate(
-        self,
-        user_message: str,
-        constraints: Constraints,
-        draft: DraftRecommendation,
-        rejected_titles: list[str] | None = None,
-    ) -> EvaluationResult:
-        violations = detect_constraint_violations(draft, constraints, rejected_titles)
-
-        if violations:
-            logger.info(
-                f"StubEvaluator: draft for '{draft.movie.title}' failed "
-                f"with {len(violations)} violation(s)"
-            )
-            return EvaluationResult(
-                passed=False,
-                score=0.0,
-                feedback="Draft violates one or more hard constraints.",
-                constraint_violations=violations,
-                improvement_suggestions=[
-                    "pick a different candidate that satisfies the constraints",
-                ],
-            )
-
-        logger.info(
-            f"StubEvaluator: draft for '{draft.movie.title}' passed "
-            f"(score={self._default_score:.2f})"
-        )
-        return EvaluationResult(
-            passed=True,
-            score=self._default_score,
-            feedback="Draft satisfies hard constraints.",
-            constraint_violations=[],
-            improvement_suggestions=[],
-        )
 
 
 class LLMEvaluatorAgent(EvaluatorAgent):

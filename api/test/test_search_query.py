@@ -2,7 +2,7 @@
 
 These tests verify that:
 1. MovieSearchQuery schema captures rich search signals
-2. StubMovieFinderAgent filters by actors, directors, year, etc.
+2. InMemoryMovieFinderAgent filters by actors, directors, year, etc.
 3. TMDBMovieFinderAgent uses multi-step search strategy
 4. InputOrchestratorAgent extracts search queries correctly
 """
@@ -12,7 +12,7 @@ from unittest.mock import MagicMock, patch
 
 from app.schemas.input import Constraints, MovieSearchQuery
 from app.schemas.domain import MovieResult
-from app.agents import StubMovieFinderAgent, TMDBMovieFinderAgent
+from app.agents import InMemoryMovieFinderAgent, TMDBMovieFinderAgent
 from app.agents.tmdb_movie_finder_agent import LANGUAGE_NAME_TO_CODE
 
 
@@ -73,12 +73,12 @@ class TestMovieSearchQuerySchema:
         assert query.has_keyword_criteria()
 
 
-class TestStubMovieFinderWithSearchQuery:
-    """Tests for StubMovieFinderAgent with rich search queries."""
+class TestInMemoryMovieFinderWithSearchQuery:
+    """Tests for InMemoryMovieFinderAgent with rich search queries."""
 
     def test_find_by_actor_name(self):
         """Should find movies by actor name."""
-        finder = StubMovieFinderAgent()
+        finder = InMemoryMovieFinderAgent()
         query = MovieSearchQuery(actors=["Angelina Jolie"])
 
         results = finder.find_movies(
@@ -91,7 +91,7 @@ class TestStubMovieFinderWithSearchQuery:
 
     def test_find_by_director_name(self):
         """Should find movies by director name."""
-        finder = StubMovieFinderAgent()
+        finder = InMemoryMovieFinderAgent()
         query = MovieSearchQuery(directors=["Christopher Nolan"])
 
         results = finder.find_movies(
@@ -107,7 +107,7 @@ class TestStubMovieFinderWithSearchQuery:
 
     def test_find_by_exact_year(self):
         """Should find movies by exact year."""
-        finder = StubMovieFinderAgent()
+        finder = InMemoryMovieFinderAgent()
         query = MovieSearchQuery(year=1999)
 
         results = finder.find_movies(
@@ -120,7 +120,7 @@ class TestStubMovieFinderWithSearchQuery:
 
     def test_find_by_year_range_90s(self):
         """Should find movies from the 90s."""
-        finder = StubMovieFinderAgent()
+        finder = InMemoryMovieFinderAgent()
         query = MovieSearchQuery(year_start=1990, year_end=1999)
 
         results = finder.find_movies(
@@ -133,7 +133,7 @@ class TestStubMovieFinderWithSearchQuery:
 
     def test_combined_actor_and_genre(self):
         """Should find movies matching both actor and genre."""
-        finder = StubMovieFinderAgent()
+        finder = InMemoryMovieFinderAgent()
         query = MovieSearchQuery(actors=["Angelina Jolie"])
         constraints = Constraints(genres=["drama"])
 
@@ -149,7 +149,7 @@ class TestStubMovieFinderWithSearchQuery:
 
     def test_combined_director_and_runtime(self):
         """Should find movies matching director and runtime constraint."""
-        finder = StubMovieFinderAgent()
+        finder = InMemoryMovieFinderAgent()
         query = MovieSearchQuery(directors=["Christopher Nolan"])
         constraints = Constraints(max_runtime_minutes=150)
 
@@ -165,7 +165,7 @@ class TestStubMovieFinderWithSearchQuery:
 
     def test_no_results_for_nonexistent_actor(self):
         """Should return empty list for unknown actor."""
-        finder = StubMovieFinderAgent()
+        finder = InMemoryMovieFinderAgent()
         query = MovieSearchQuery(actors=["Unknown Actor Name XYZ"])
 
         results = finder.find_movies(
@@ -177,7 +177,7 @@ class TestStubMovieFinderWithSearchQuery:
 
     def test_backward_compatibility_without_search_query(self):
         """Should work without search_query for backward compatibility."""
-        finder = StubMovieFinderAgent()
+        finder = InMemoryMovieFinderAgent()
         constraints = Constraints(genres=["sci-fi"])
 
         results = finder.find_movies(constraints=constraints)

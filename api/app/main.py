@@ -11,7 +11,7 @@ from app.agents import (
     LLMRAGAssistantAgent,
     LLMRecommendationWriterAgent,
     MovieFinderAgent,
-    StubMovieFinderAgent,
+    InMemoryMovieFinderAgent,
     SystemResponder,
     TMDBMovieFinderAgent,
 )
@@ -40,26 +40,28 @@ def create_movie_finder(settings: Settings) -> MovieFinderAgent:
         settings: Application settings.
 
     Returns:
-        MovieFinderAgent instance (TMDB or Stub).
+        MovieFinderAgent instance (TMDB or in-memory).
     """
     global _tmdb_client
     mode = settings.movie_finder_mode.lower()
 
-    if mode == "stub":
-        logger.info("Using StubMovieFinderAgent (explicit config)")
-        return StubMovieFinderAgent()
+    if mode == "inmemory":
+        logger.info("Using InMemoryMovieFinderAgent (explicit config)")
+        return InMemoryMovieFinderAgent()
 
     if mode == "tmdb" or (mode == "auto" and settings.tmdb_api_key):
         if not settings.tmdb_api_key:
-            logger.warning("TMDB mode requested but no API key; falling back to stub")
-            return StubMovieFinderAgent()
+            logger.warning(
+                "TMDB mode requested but no API key; falling back to in-memory finder"
+            )
+            return InMemoryMovieFinderAgent()
 
         logger.info("Using TMDBMovieFinderAgent")
         _tmdb_client = TMDBClient(api_key=settings.tmdb_api_key)
         return TMDBMovieFinderAgent(_tmdb_client)
 
-    logger.info("Using StubMovieFinderAgent (no TMDB key)")
-    return StubMovieFinderAgent()
+    logger.info("Using InMemoryMovieFinderAgent (no TMDB key)")
+    return InMemoryMovieFinderAgent()
 
 
 def cleanup_tmdb_client() -> None:

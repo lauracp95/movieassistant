@@ -5,10 +5,7 @@ from unittest.mock import MagicMock
 import pytest
 from langchain_openai import AzureChatOpenAI
 
-from app.agents.recommendation_agent import (
-    LLMRecommendationWriterAgent,
-    StubRecommendationWriterAgent,
-)
+from app.agents.recommendation_agent import LLMRecommendationWriterAgent
 from app.workflow.candidate_selector import (
     build_reasoning,
     filter_candidates,
@@ -185,77 +182,6 @@ class TestBuildReasoning:
         assert isinstance(reasoning, str) and reasoning
 
 
-class TestStubRecommendationWriterAgent:
-    def test_returns_none_on_empty_candidates(self):
-        writer = StubRecommendationWriterAgent()
-        result = writer.write(
-            user_message="Any movie",
-            constraints=Constraints(),
-            candidates=[],
-        )
-        assert result is None
-
-    def test_returns_none_when_all_rejected(self):
-        writer = StubRecommendationWriterAgent()
-        movie = _movie("1", "Only", genres=["comedy"])
-        result = writer.write(
-            user_message="Comedy please",
-            constraints=Constraints(genres=["comedy"]),
-            candidates=[movie],
-            rejected_titles=["Only"],
-        )
-        assert result is None
-
-    def test_produces_valid_draft(self):
-        writer = StubRecommendationWriterAgent()
-        movie = _movie(
-            "1",
-            "The Matrix",
-            genres=["Sci-Fi", "Action"],
-            runtime_minutes=136,
-            rating=8.7,
-            year=1999,
-            overview="A hacker discovers the truth.",
-        )
-        result = writer.write(
-            user_message="Give me sci-fi",
-            constraints=Constraints(genres=["sci-fi"]),
-            candidates=[movie],
-        )
-        assert isinstance(result, DraftRecommendation)
-        assert result.movie.title == "The Matrix"
-        assert "Matrix" in result.recommendation_text
-        assert result.reasoning is not None
-
-    def test_text_grounded_in_overview(self):
-        writer = StubRecommendationWriterAgent()
-        movie = _movie(
-            "1",
-            "My Movie",
-            genres=["comedy"],
-            overview="A very specific plot fingerprint here.",
-        )
-        result = writer.write(
-            user_message="Comedy",
-            constraints=Constraints(genres=["comedy"]),
-            candidates=[movie],
-        )
-        assert result is not None
-        assert "specific plot fingerprint" in result.recommendation_text
-
-    def test_selects_best_candidate_deterministically(self):
-        writer = StubRecommendationWriterAgent()
-        worse = _movie("1", "Worse", genres=["comedy"], rating=5.0)
-        better = _movie("2", "Better", genres=["comedy"], rating=9.0)
-        result = writer.write(
-            user_message="Funny movie",
-            constraints=Constraints(genres=["comedy"]),
-            candidates=[worse, better],
-        )
-        assert result is not None
-        assert result.movie.title == "Better"
-
-
 class TestLLMRecommendationWriterAgent:
     def test_returns_none_on_empty_candidates(self):
         llm = MagicMock(spec=AzureChatOpenAI)
@@ -348,3 +274,55 @@ class TestLLMRecommendationWriterAgent:
 
         assert result is not None
         assert result.movie.title == "The Matrix"
+
+    def test_returns_none_when_all_rejected(self):
+        llm = MagicMock(spec=AzureChatOpenAI)
+        writer = LLMRecommendationWriterAgent(llm)
+        movie = _movie("1", "Only", genres=["comedy"])
+        result = writer.write(
+            user_message="Comedy please",
+            constraints=Constraints(genres=["comedy"]),
+            candidates=[movie],
+            rejected_titles=["Only"],
+        )
+        assert result is None
+        llm.invoke.assert_not_called()
+
+    def test_produces_valid_draft_with_reasoning(self):
+        llm = MagicMock(spec=AzureChatOpenAI)
+        llm.invoke.return_value = MagicMock(content="Watch The Matrix tonight.")
+
+        movie = _movie(
+            "1",
+            "The Matrix",
+            genres=["Sci-Fi", "Action"],
+            runtime_minutes=136,
+            rating=8.7,
+            year=1999,
+            overview="A hacker discovers the truth.",
+        )
+        writer = LLMRecommendationWriterAgent(llm)
+        result = writer.write(
+            user_message="Give me sci-fi",
+            constraints=Constraints(genres=["sci-fi"]),
+            candidates=[movie],
+        )
+        assert isinstance(result, DraftRecommendation)
+        assert result.movie.title == "The Matrix"
+        assert result.recommendation_text == "Watch The Matrix tonight."
+        assert result.reasoning is not None
+
+    def test_selects_best_candidate_deterministically(self):
+        llm = MagicMock(spec=AzureChatOpenAI)
+        llm.invoke.return_value = MagicMock(content="Funny pick!")
+
+        worse = _movie("1", "Worse", genres=["comedy"], rating=5.0)
+        better = _movie("2", "Better", genres=["comedy"], rating=9.0)
+        writer = LLMRecommendationWriterAgent(llm)
+        result = writer.write(
+            user_message="Funny movie",
+            constraints=Constraints(genres=["comedy"]),
+            candidates=[worse, better],
+        )
+        assert result is not None
+        assert result.movie.title == "Better"

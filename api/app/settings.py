@@ -15,8 +15,8 @@ class Settings(BaseSettings):
     Optional:
         - TEMPERATURE: Model temperature (default: 0.7)
         - MAX_TOKENS: Maximum tokens in response (optional)
-        - TMDB_API_KEY: TMDB API key for movie retrieval (optional, uses stub if not set)
-        - MOVIE_FINDER_MODE: "tmdb", "stub", or "auto" (default: auto)
+        - TMDB_API_KEY: TMDB API key for movie retrieval (optional, uses in-memory catalog if not set)
+        - MOVIE_FINDER_MODE: "tmdb", "inmemory", or "auto" (default: auto)
 
     Optional (LangSmith tracing; both LANGCHAIN_TRACING_V2 and LANGCHAIN_API_KEY
     must be set for tracing to activate — see langsmith_enabled):
@@ -61,11 +61,11 @@ class Settings(BaseSettings):
     # TMDB integration (optional)
     tmdb_api_key: str | None = Field(
         default=None,
-        description="TMDB API key for movie retrieval (if not set, uses stub finder)"
+        description="TMDB API key for movie retrieval (if not set, uses in-memory finder)"
     )
     movie_finder_mode: str = Field(
         default="auto",
-        description="Movie finder mode: 'tmdb', 'stub', or 'auto' (auto-detect based on API key)"
+        description="Movie finder mode: 'tmdb', 'inmemory', or 'auto' (auto-detect based on API key)"
     )
     
     # LangSmith observability (optional)

@@ -5,21 +5,21 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from app.integrations.tmdb_client import TMDBClient, TMDBClientError
-from app.agents import MovieFinderAgent, StubMovieFinderAgent, TMDBMovieFinderAgent
+from app.agents import MovieFinderAgent, InMemoryMovieFinderAgent, TMDBMovieFinderAgent
 from app.schemas.domain import MovieResult
 from app.schemas.input import Constraints
 
 
-class TestStubMovieFinderAgent:
-    def test_stub_finder_returns_movie_results(self):
-        finder = StubMovieFinderAgent()
+class TestInMemoryMovieFinderAgent:
+    def test_in_memory_finder_returns_movie_results(self):
+        finder = InMemoryMovieFinderAgent()
         results = finder.find_movies(Constraints())
 
         assert len(results) > 0
         assert all(isinstance(m, MovieResult) for m in results)
 
-    def test_stub_finder_filters_by_genre(self):
-        finder = StubMovieFinderAgent()
+    def test_in_memory_finder_filters_by_genre(self):
+        finder = InMemoryMovieFinderAgent()
         results = finder.find_movies(Constraints(genres=["Horror"]))
 
         assert len(results) > 0
@@ -27,8 +27,8 @@ class TestStubMovieFinderAgent:
             movie_genres = [g.lower() for g in movie.genres]
             assert "horror" in movie_genres
 
-    def test_stub_finder_filters_by_multiple_genres(self):
-        finder = StubMovieFinderAgent()
+    def test_in_memory_finder_filters_by_multiple_genres(self):
+        finder = InMemoryMovieFinderAgent()
         results = finder.find_movies(Constraints(genres=["Action", "Sci-Fi"]))
 
         assert len(results) > 0
@@ -36,30 +36,30 @@ class TestStubMovieFinderAgent:
             movie_genres = {g.lower() for g in movie.genres}
             assert movie_genres & {"action", "sci-fi"}
 
-    def test_stub_finder_filters_by_max_runtime(self):
-        finder = StubMovieFinderAgent()
+    def test_in_memory_finder_filters_by_max_runtime(self):
+        finder = InMemoryMovieFinderAgent()
         results = finder.find_movies(Constraints(max_runtime_minutes=100))
 
         assert len(results) > 0
         for movie in results:
             assert movie.runtime_minutes is None or movie.runtime_minutes <= 100
 
-    def test_stub_finder_filters_by_min_runtime(self):
-        finder = StubMovieFinderAgent()
+    def test_in_memory_finder_filters_by_min_runtime(self):
+        finder = InMemoryMovieFinderAgent()
         results = finder.find_movies(Constraints(min_runtime_minutes=140))
 
         assert len(results) > 0
         for movie in results:
             assert movie.runtime_minutes is None or movie.runtime_minutes >= 140
 
-    def test_stub_finder_respects_limit(self):
-        finder = StubMovieFinderAgent()
+    def test_in_memory_finder_respects_limit(self):
+        finder = InMemoryMovieFinderAgent()
         results = finder.find_movies(Constraints(), limit=3)
 
         assert len(results) <= 3
 
-    def test_stub_finder_excludes_titles(self):
-        finder = StubMovieFinderAgent()
+    def test_in_memory_finder_excludes_titles(self):
+        finder = InMemoryMovieFinderAgent()
         results = finder.find_movies(
             Constraints(),
             excluded_titles=["The Matrix", "Inception"],
@@ -69,15 +69,15 @@ class TestStubMovieFinderAgent:
         assert "the matrix" not in titles
         assert "inception" not in titles
 
-    def test_stub_finder_returns_empty_for_no_matches(self):
-        finder = StubMovieFinderAgent()
+    def test_in_memory_finder_returns_empty_for_no_matches(self):
+        finder = InMemoryMovieFinderAgent()
         results = finder.find_movies(
             Constraints(genres=["NonExistentGenre123"])
         )
 
         assert results == []
 
-    def test_stub_finder_with_custom_movies(self):
+    def test_in_memory_finder_with_custom_movies(self):
         custom_movies = [
             MovieResult(
                 id="custom-1",
@@ -87,21 +87,21 @@ class TestStubMovieFinderAgent:
                 source="test",
             ),
         ]
-        finder = StubMovieFinderAgent(custom_movies=custom_movies)
+        finder = InMemoryMovieFinderAgent(custom_movies=custom_movies)
         results = finder.find_movies(Constraints())
 
         assert len(results) == 1
         assert results[0].title == "Custom Movie"
 
-    def test_stub_finder_all_movies_have_source_stub(self):
-        finder = StubMovieFinderAgent()
+    def test_in_memory_finder_all_movies_have_source_inmemory(self):
+        finder = InMemoryMovieFinderAgent()
         results = finder.find_movies(Constraints())
 
         for movie in results:
-            assert movie.source == "stub"
+            assert movie.source == "inmemory"
 
-    def test_stub_finder_combined_constraints(self):
-        finder = StubMovieFinderAgent()
+    def test_in_memory_finder_combined_constraints(self):
+        finder = InMemoryMovieFinderAgent()
         results = finder.find_movies(
             Constraints(
                 genres=["Sci-Fi"],
@@ -211,8 +211,8 @@ class TestTMDBMovieFinderAgent:
 
 
 class TestMovieFinderAgentProtocol:
-    def test_stub_finder_is_movie_finder_agent(self):
-        finder = StubMovieFinderAgent()
+    def test_in_memory_finder_is_movie_finder_agent(self):
+        finder = InMemoryMovieFinderAgent()
         assert isinstance(finder, MovieFinderAgent)
 
     def test_tmdb_finder_is_movie_finder_agent(self):

@@ -43,45 +43,6 @@ class RAGAssistantAgent(ABC):
         pass
 
 
-class StubRAGAssistantAgent(RAGAssistantAgent):
-    """Stub implementation for testing without LLM calls.
-
-    Returns a fixed response that includes context information.
-    """
-
-    def answer(
-        self,
-        query: str,
-        contexts: list[RetrievedContext],
-    ) -> str:
-        """Generate a stub answer.
-
-        Args:
-            query: The user's question.
-            contexts: Retrieved contexts from the knowledge base.
-
-        Returns:
-            A stub answer mentioning the retrieved contexts.
-        """
-        if not contexts:
-            return (
-                "I don't have specific information about that in my knowledge base. "
-                "This is a Movie Night Assistant that helps you discover movies to watch."
-            )
-
-        sources = [
-            ctx.metadata.get("title", ctx.metadata.get("source_file", "unknown"))
-            for ctx in contexts
-        ]
-        source_list = ", ".join(set(sources))
-
-        return (
-            f"Based on my knowledge base ({source_list}), I can help answer "
-            f"questions about how the Movie Night Assistant works. "
-            f"[Retrieved {len(contexts)} relevant context(s)]"
-        )
-
-
 class LLMRAGAssistantAgent(RAGAssistantAgent):
     """LLM-powered RAG assistant agent.
 
