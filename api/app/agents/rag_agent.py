@@ -1,61 +1,23 @@
-"""RAGAssistantAgent for the Movie Night Assistant.
-
-This module provides the RAG (Retrieval-Augmented Generation) agent that
-answers questions about the system using retrieved internal documentation.
-"""
+"""RAGAssistantAgent for the Movie Night Assistant."""
 
 import logging
 import time
-from abc import ABC, abstractmethod
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import AzureChatOpenAI
 
 from app.llm.prompts import RAG_ASSISTANT_SYSTEM_PROMPT
-from app.rag.retriever import DocumentRetriever
 from app.schemas.domain import RetrievedContext
 
 logger = logging.getLogger(__name__)
 
-
-class RAGAssistantAgent(ABC):
-    """Abstract base class for RAG assistant agents.
-
-    RAG assistant agents answer questions about the system using
-    retrieved context from the internal knowledge base.
-    """
-
-    @abstractmethod
-    def answer(
-        self,
-        query: str,
-        contexts: list[RetrievedContext],
-    ) -> str:
-        """Generate an answer using retrieved contexts.
-
-        Args:
-            query: The user's question.
-            contexts: Retrieved contexts from the knowledge base.
-
-        Returns:
-            The generated answer grounded in the contexts.
-        """
-        pass
+__all__ = ["RAGAssistantAgent"]
 
 
-class LLMRAGAssistantAgent(RAGAssistantAgent):
-    """LLM-powered RAG assistant agent.
-
-    Uses Azure OpenAI to generate answers grounded in retrieved
-    context from the knowledge base.
-    """
+class RAGAssistantAgent:
+    """Answers system questions using retrieved documentation and an LLM."""
 
     def __init__(self, llm: AzureChatOpenAI) -> None:
-        """Initialize the RAG assistant with a chat model.
-
-        Args:
-            llm: Azure OpenAI chat model instance.
-        """
         self._llm = llm
 
     def answer(
@@ -63,17 +25,7 @@ class LLMRAGAssistantAgent(RAGAssistantAgent):
         query: str,
         contexts: list[RetrievedContext],
     ) -> str:
-        """Generate an answer using the LLM and retrieved contexts.
-
-        Args:
-            query: The user's question.
-            contexts: Retrieved contexts from the knowledge base.
-
-        Returns:
-            The generated answer grounded in the contexts.
-        """
         context_text = self._format_contexts(contexts)
-
         user_prompt = self._build_user_prompt(query, context_text)
 
         messages = [
@@ -91,14 +43,6 @@ class LLMRAGAssistantAgent(RAGAssistantAgent):
         return reply
 
     def _format_contexts(self, contexts: list[RetrievedContext]) -> str:
-        """Format retrieved contexts for the prompt.
-
-        Args:
-            contexts: List of retrieved contexts.
-
-        Returns:
-            Formatted context string.
-        """
         if not contexts:
             return "No relevant documentation found."
 
@@ -116,15 +60,6 @@ class LLMRAGAssistantAgent(RAGAssistantAgent):
         return "\n\n---\n\n".join(formatted_parts)
 
     def _build_user_prompt(self, query: str, context_text: str) -> str:
-        """Build the user prompt with query and context.
-
-        Args:
-            query: The user's question.
-            context_text: Formatted context text.
-
-        Returns:
-            The complete user prompt.
-        """
         return f"""## User Question
 {query}
 

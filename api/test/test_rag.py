@@ -6,7 +6,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from app.agents.rag_agent import LLMRAGAssistantAgent, RAGAssistantAgent
+from app.agents.rag_agent import RAGAssistantAgent
 from app.rag.ingest import (
     DEFAULT_CHUNK_SIZE,
     DocumentIngester,
@@ -233,14 +233,14 @@ class TestDocumentRetriever:
             assert len(retriever._documents) >= 1
 
 
-class TestLLMRAGAssistantAgent:
+class TestRAGAssistantAgent:
     def test_answer_calls_llm(self):
         mock_llm = MagicMock()
         mock_llm.invoke.return_value = MagicMock(
             content="This is the answer based on documentation."
         )
 
-        agent = LLMRAGAssistantAgent(mock_llm)
+        agent = RAGAssistantAgent(mock_llm)
         contexts = [
             RetrievedContext(
                 content="Documentation content",
@@ -259,7 +259,7 @@ class TestLLMRAGAssistantAgent:
         mock_llm = MagicMock()
         mock_llm.invoke.return_value = MagicMock(content="Answer")
 
-        agent = LLMRAGAssistantAgent(mock_llm)
+        agent = RAGAssistantAgent(mock_llm)
         contexts = [
             RetrievedContext(
                 content="First context content",
@@ -289,7 +289,7 @@ class TestLLMRAGAssistantAgent:
         mock_llm = MagicMock()
         mock_llm.invoke.return_value = MagicMock(content="No documentation found.")
 
-        agent = LLMRAGAssistantAgent(mock_llm)
+        agent = RAGAssistantAgent(mock_llm)
         answer = agent.answer("query", [])
 
         mock_llm.invoke.assert_called_once()

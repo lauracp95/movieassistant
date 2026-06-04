@@ -1,28 +1,9 @@
-"""EvaluatorAgent implementations for the Movie Night Assistant.
-
-This module is responsible for the EVALUATION step of the pipeline. It takes a
-:class:`DraftRecommendation` produced by the writer and returns an
-:class:`EvaluationResult` that the workflow uses to decide whether to accept
-the draft or retry with a different candidate.
-
-The evaluator is deliberately separated from both retrieval
-(:class:`MovieFinderAgent`) and composition
-(:class:`RecommendationWriterAgent`). It must not fetch movies, and it must
-not rewrite drafts. Its sole responsibility is to judge.
-
-Implementations:
-    - :class:`EvaluatorAgent`: abstract base
-    - :class:`LLMEvaluatorAgent`: LLM-judged evaluation with structured output
-
-The workflow consults :data:`app.workflow.state.PASS_THRESHOLD` to determine the
-final pass/fail decision alongside the agent's own ``passed`` flag.
-"""
+"""EvaluatorAgent for the Movie Night Assistant."""
 
 from __future__ import annotations
 
 import logging
 import time
-from abc import ABC, abstractmethod
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import AzureChatOpenAI
@@ -34,49 +15,13 @@ from app.schemas.input import Constraints
 
 logger = logging.getLogger(__name__)
 
-
-class EvaluatorAgent(ABC):
-    """Abstract evaluator that judges a :class:`DraftRecommendation`.
-
-    The evaluator is NOT responsible for retrieval and NOT responsible for
-    composition. Given a draft, it produces an :class:`EvaluationResult`.
-    """
-
-    @abstractmethod
-    def evaluate(
-        self,
-        user_message: str,
-        constraints: Constraints,
-        draft: DraftRecommendation,
-        rejected_titles: list[str] | None = None,
-    ) -> EvaluationResult:
-        """Evaluate a draft recommendation.
-
-        Args:
-            user_message: The original user request.
-            constraints: Extracted user constraints.
-            draft: The draft recommendation to judge.
-            rejected_titles: Titles rejected in previous retries.
-
-        Returns:
-            A valid :class:`EvaluationResult`.
-        """
+__all__ = ["EvaluatorAgent"]
 
 
-class LLMEvaluatorAgent(EvaluatorAgent):
-    """Production evaluator using an LLM with structured output.
-
-    A deterministic pre-check still runs first: if the draft violates a hard
-    constraint, we fail fast without calling the LLM. Otherwise we delegate
-    the quality judgment to the LLM.
-    """
+class EvaluatorAgent:
+    """Judges a :class:`DraftRecommendation` using deterministic checks and an LLM."""
 
     def __init__(self, llm: AzureChatOpenAI) -> None:
-        """Initialize with a chat model.
-
-        Args:
-            llm: Azure OpenAI chat model instance.
-        """
         self._llm = llm.with_structured_output(EvaluationResult)
 
     def evaluate(
@@ -89,7 +34,7 @@ class LLMEvaluatorAgent(EvaluatorAgent):
         violations = detect_constraint_violations(draft, constraints, rejected_titles)
         if violations:
             logger.info(
-                f"LLMEvaluator: draft for '{draft.movie.title}' failed "
+                f"Evaluator: draft for '{draft.movie.title}' failed "
                 f"deterministic pre-check with {len(violations)} violation(s)"
             )
             return EvaluationResult(
@@ -108,7 +53,7 @@ class LLMEvaluatorAgent(EvaluatorAgent):
             )
         except Exception as exc:
             logger.warning(
-                f"LLMEvaluator LLM call failed ({exc}); "
+                f"Evaluator LLM call failed ({exc}); "
                 "defaulting to a conservative pass based on deterministic checks"
             )
             return EvaluationResult(
@@ -123,7 +68,7 @@ class LLMEvaluatorAgent(EvaluatorAgent):
             )
 
         logger.info(
-            f"LLMEvaluator: draft for '{draft.movie.title}' scored "
+            f"Evaluator: draft for '{draft.movie.title}' scored "
             f"{result.score:.2f}, passed={result.passed}"
         )
         return result
@@ -135,7 +80,6 @@ class LLMEvaluatorAgent(EvaluatorAgent):
         draft: DraftRecommendation,
         rejected_titles: list[str] | None,
     ) -> EvaluationResult:
-        """Call the LLM to produce a structured :class:`EvaluationResult`."""
         human_content = self._build_prompt(
             user_message, constraints, draft, rejected_titles
         )
@@ -149,8 +93,7 @@ class LLMEvaluatorAgent(EvaluatorAgent):
         result = self._llm.invoke(messages)
         elapsed = time.time() - start
         logger.info(
-            f"LLMEvaluator response ({elapsed:.2f}s): "
-            f"{result.model_dump_json()}"
+            f"Evaluator response ({elapsed:.2f}s): {result.model_dump_json()}"
         )
         return result
 
@@ -161,7 +104,6 @@ class LLMEvaluatorAgent(EvaluatorAgent):
         draft: DraftRecommendation,
         rejected_titles: list[str] | None,
     ) -> str:
-        """Build the user prompt for the LLM."""
         constraints_text = self._format_constraints(constraints)
         movie_block = self._format_movie(draft.movie)
         rejected_block = ", ".join(rejected_titles) if rejected_titles else "(none)"
@@ -177,7 +119,6 @@ class LLMEvaluatorAgent(EvaluatorAgent):
         )
 
     def _format_constraints(self, constraints: Constraints) -> str:
-        """Format constraints for the prompt."""
         lines: list[str] = []
         if constraints.genres:
             lines.append(f"- genres: {', '.join(constraints.genres)}")
@@ -188,7 +129,6 @@ class LLMEvaluatorAgent(EvaluatorAgent):
         return "\n".join(lines) if lines else "- (none detected)"
 
     def _format_movie(self, movie) -> str:
-        """Format movie data for the prompt."""
         lines = [
             f"- title: {movie.title}",
             f"- year: {movie.year if movie.year is not None else 'unknown'}",

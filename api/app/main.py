@@ -6,12 +6,12 @@ from fastapi import FastAPI
 from pydantic import ValidationError
 
 from app.agents import (
+    EvaluatorAgent,
     InputOrchestratorAgent,
-    LLMEvaluatorAgent,
-    LLMRAGAssistantAgent,
-    LLMRecommendationWriterAgent,
-    MovieFinderAgent,
     InMemoryMovieFinderAgent,
+    MovieFinderAgent,
+    RAGAssistantAgent,
+    RecommendationWriterAgent,
     SystemResponder,
     TMDBMovieFinderAgent,
 )
@@ -93,11 +93,11 @@ async def lifespan(app: FastAPI):
         input_agent = InputOrchestratorAgent(input_agent_llm)
         system_responder = SystemResponder(llm)
         movie_finder = create_movie_finder(settings)
-        recommendation_writer = LLMRecommendationWriterAgent(writer_llm)
-        evaluator = LLMEvaluatorAgent(evaluator_llm)
+        recommendation_writer = RecommendationWriterAgent(writer_llm)
+        evaluator = EvaluatorAgent(evaluator_llm)
 
         rag_retriever = create_retriever()
-        rag_agent = LLMRAGAssistantAgent(rag_llm)
+        rag_agent = RAGAssistantAgent(rag_llm)
         logger.info(
             f"RAG retriever initialized with {len(rag_retriever._documents)} documents"
         )

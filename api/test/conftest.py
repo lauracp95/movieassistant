@@ -11,16 +11,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from app.agents import (
     EvaluatorAgent,
     InputOrchestratorAgent,
-    LLMEvaluatorAgent,
-    LLMRAGAssistantAgent,
+    InMemoryMovieFinderAgent,
     MovieFinderAgent,
     RAGAssistantAgent,
-    InMemoryMovieFinderAgent,
-    SystemResponder,
-)
-from app.agents.recommendation_agent import (
-    LLMRecommendationWriterAgent,
     RecommendationWriterAgent,
+    SystemResponder,
 )
 from app.rag.retriever import DocumentRetriever
 from app.schemas.domain import EvaluationResult, MovieResult
@@ -52,17 +47,12 @@ def mock_recommendation_writer():
 
 
 @pytest.fixture
-def recommendation_writer_llm():
+def recommendation_writer():
     llm = MagicMock(spec=AzureChatOpenAI)
     llm.invoke.return_value = MagicMock(
         content="A great pick for your movie night."
     )
-    return llm
-
-
-@pytest.fixture
-def llm_recommendation_writer(recommendation_writer_llm):
-    return LLMRecommendationWriterAgent(recommendation_writer_llm)
+    return RecommendationWriterAgent(llm)
 
 
 @pytest.fixture
@@ -71,7 +61,7 @@ def mock_evaluator():
 
 
 @pytest.fixture
-def evaluator_llm():
+def evaluator():
     llm = MagicMock(spec=AzureChatOpenAI)
     structured = MagicMock()
     structured.invoke.return_value = EvaluationResult(
@@ -82,12 +72,7 @@ def evaluator_llm():
         improvement_suggestions=[],
     )
     llm.with_structured_output.return_value = structured
-    return llm
-
-
-@pytest.fixture
-def llm_evaluator(evaluator_llm):
-    return LLMEvaluatorAgent(evaluator_llm)
+    return EvaluatorAgent(llm)
 
 
 @pytest.fixture
@@ -101,7 +86,7 @@ def mock_rag_agent():
 
 
 @pytest.fixture
-def rag_agent_llm():
+def rag_agent():
     llm = MagicMock(spec=AzureChatOpenAI)
     llm.invoke.return_value = MagicMock(
         content=(
@@ -109,12 +94,7 @@ def rag_agent_llm():
             "questions about how the Movie Night Assistant works."
         )
     )
-    return llm
-
-
-@pytest.fixture
-def llm_rag_agent(rag_agent_llm):
-    return LLMRAGAssistantAgent(rag_agent_llm)
+    return RAGAssistantAgent(llm)
 
 
 def make_movie(

@@ -1,24 +1,9 @@
-"""RecommendationWriterAgent implementations for the Movie Night Assistant.
-
-This module is responsible for the RECOMMENDATION COMPOSITION step of the
-pipeline. It is deliberately separated from candidate retrieval
-(``MovieFinderAgent``) and from quality evaluation (``EvaluatorAgent``).
-
-Responsibilities:
-    1. Use deterministic candidate selection (from candidate_selector module)
-    2. Select ONE movie and produce a :class:`DraftRecommendation`
-    3. Use the LLM ONLY to write the short natural-language explanation
-
-Implementations:
-    - :class:`RecommendationWriterAgent`: abstract base
-    - :class:`LLMRecommendationWriterAgent`: deterministic selection + LLM text
-"""
+"""RecommendationWriterAgent for the Movie Night Assistant."""
 
 from __future__ import annotations
 
 import logging
 import time
-from abc import ABC, abstractmethod
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import AzureChatOpenAI
@@ -26,8 +11,6 @@ from langchain_openai import AzureChatOpenAI
 from app.workflow.candidate_selector import (
     build_deterministic_recommendation_text,
     build_reasoning,
-    filter_candidates,
-    prioritize_candidates,
     select_best_candidate,
 )
 from app.llm.prompts import RECOMMENDATION_WRITER_SYSTEM_PROMPT
@@ -36,55 +19,13 @@ from app.schemas.input import Constraints
 
 logger = logging.getLogger(__name__)
 
-__all__ = [
-    "RecommendationWriterAgent",
-    "LLMRecommendationWriterAgent",
-]
+__all__ = ["RecommendationWriterAgent"]
 
 
-class RecommendationWriterAgent(ABC):
-    """Abstract writer that turns candidates into a :class:`DraftRecommendation`.
-
-    The writer is NOT responsible for retrieval and NOT responsible for
-    evaluation. It ONLY selects one candidate and composes the draft.
-    """
-
-    @abstractmethod
-    def write(
-        self,
-        user_message: str,
-        constraints: Constraints,
-        candidates: list[MovieResult],
-        rejected_titles: list[str] | None = None,
-    ) -> DraftRecommendation | None:
-        """Produce a draft recommendation.
-
-        Args:
-            user_message: The original user request.
-            constraints: Extracted user constraints.
-            candidates: Candidate movies retrieved by the finder.
-            rejected_titles: Titles the evaluator has previously rejected.
-
-        Returns:
-            A valid :class:`DraftRecommendation`, or ``None`` if no
-            candidate could be selected (caller should handle gracefully).
-        """
-
-
-class LLMRecommendationWriterAgent(RecommendationWriterAgent):
-    """Production writer: deterministic selection + LLM-composed text.
-
-    The LLM is used ONLY for writing the short explanation. Movie selection,
-    filtering and prioritization remain fully deterministic so the writer's
-    behavior is predictable and easy to reason about.
-    """
+class RecommendationWriterAgent:
+    """Selects a candidate and composes a :class:`DraftRecommendation` using an LLM."""
 
     def __init__(self, llm: AzureChatOpenAI) -> None:
-        """Initialize with a chat model.
-
-        Args:
-            llm: Azure OpenAI chat model instance.
-        """
         self._llm = llm
 
     def write(
@@ -95,13 +36,13 @@ class LLMRecommendationWriterAgent(RecommendationWriterAgent):
         rejected_titles: list[str] | None = None,
     ) -> DraftRecommendation | None:
         logger.info(
-            "LLMRecommendationWriter composing draft "
+            "RecommendationWriter composing draft "
             f"(candidates={len(candidates)}, rejected={len(rejected_titles or [])})"
         )
 
         movie = select_best_candidate(candidates, constraints, rejected_titles)
         if movie is None:
-            logger.info("LLMRecommendationWriter: no candidate survived filtering")
+            logger.info("RecommendationWriter: no candidate survived filtering")
             return None
 
         reasoning = build_reasoning(movie, constraints)
@@ -110,7 +51,7 @@ class LLMRecommendationWriterAgent(RecommendationWriterAgent):
             text = self._write_text(user_message, constraints, movie, rejected_titles)
         except Exception as exc:
             logger.warning(
-                f"LLMRecommendationWriter LLM call failed ({exc}); "
+                f"RecommendationWriter LLM call failed ({exc}); "
                 "falling back to deterministic text"
             )
             text = build_deterministic_recommendation_text(movie, constraints)
@@ -128,7 +69,6 @@ class LLMRecommendationWriterAgent(RecommendationWriterAgent):
         movie: MovieResult,
         rejected_titles: list[str] | None,
     ) -> str:
-        """Call the LLM to produce the grounded recommendation text."""
         human_content = self._build_prompt(
             user_message, constraints, movie, rejected_titles
         )
@@ -142,7 +82,7 @@ class LLMRecommendationWriterAgent(RecommendationWriterAgent):
         response = self._llm.invoke(messages)
         elapsed = time.time() - start
         reply = str(response.content).strip()
-        logger.info(f"LLMRecommendationWriter response ({elapsed:.2f}s): {reply}")
+        logger.info(f"RecommendationWriter response ({elapsed:.2f}s): {reply}")
 
         if not reply:
             logger.warning("LLM returned empty text; falling back to deterministic")
@@ -157,7 +97,6 @@ class LLMRecommendationWriterAgent(RecommendationWriterAgent):
         movie: MovieResult,
         rejected_titles: list[str] | None,
     ) -> str:
-        """Build the user prompt for the LLM."""
         constraints_text = self._format_constraints(constraints)
         movie_block = self._format_movie(movie)
         rejected_block = ", ".join(rejected_titles) if rejected_titles else "(none)"
@@ -171,7 +110,6 @@ class LLMRecommendationWriterAgent(RecommendationWriterAgent):
         )
 
     def _format_constraints(self, constraints: Constraints) -> str:
-        """Format constraints for the prompt."""
         lines: list[str] = []
         if constraints.genres:
             lines.append(f"- genres: {', '.join(constraints.genres)}")
@@ -182,7 +120,6 @@ class LLMRecommendationWriterAgent(RecommendationWriterAgent):
         return "\n".join(lines) if lines else "- (none detected)"
 
     def _format_movie(self, movie: MovieResult) -> str:
-        """Format movie data for the prompt."""
         lines = [
             f"- title: {movie.title}",
             f"- year: {movie.year if movie.year is not None else 'unknown'}",

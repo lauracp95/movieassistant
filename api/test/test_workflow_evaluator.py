@@ -14,8 +14,8 @@ class TestMovieNightWorkflowWithEvaluator:
         mock_input_agent,
         mock_system_responder,
         mock_movie_finder,
-        llm_recommendation_writer,
-        llm_evaluator,
+        recommendation_writer,
+        evaluator,
     ):
         mock_input_agent.decide.return_value = InputDecision(
             route="movies",
@@ -39,8 +39,8 @@ class TestMovieNightWorkflowWithEvaluator:
             system_responder=mock_system_responder,
             input_agent=mock_input_agent,
             movie_finder=mock_movie_finder,
-            recommendation_writer=llm_recommendation_writer,
-            evaluator=llm_evaluator,
+            recommendation_writer=recommendation_writer,
+            evaluator=evaluator,
         )
         result = workflow.invoke("Recommend a sci-fi movie")
 
@@ -61,7 +61,7 @@ class TestMovieNightWorkflowWithEvaluator:
         mock_input_agent,
         mock_system_responder,
         mock_movie_finder,
-        llm_recommendation_writer,
+        recommendation_writer,
         mock_evaluator,
     ):
         mock_input_agent.decide.return_value = InputDecision(
@@ -102,7 +102,7 @@ class TestMovieNightWorkflowWithEvaluator:
             system_responder=mock_system_responder,
             input_agent=mock_input_agent,
             movie_finder=mock_movie_finder,
-            recommendation_writer=llm_recommendation_writer,
+            recommendation_writer=recommendation_writer,
             evaluator=mock_evaluator,
         )
         result = workflow.invoke("Recommend a sci-fi movie")
@@ -124,7 +124,7 @@ class TestMovieNightWorkflowWithEvaluator:
         mock_input_agent,
         mock_system_responder,
         mock_movie_finder,
-        llm_recommendation_writer,
+        recommendation_writer,
         mock_evaluator,
     ):
         mock_input_agent.decide.return_value = InputDecision(
@@ -153,7 +153,7 @@ class TestMovieNightWorkflowWithEvaluator:
             system_responder=mock_system_responder,
             input_agent=mock_input_agent,
             movie_finder=mock_movie_finder,
-            recommendation_writer=llm_recommendation_writer,
+            recommendation_writer=recommendation_writer,
             evaluator=mock_evaluator,
         )
         result = workflow.invoke("Recommend a sci-fi movie")
@@ -169,7 +169,7 @@ class TestMovieNightWorkflowWithEvaluator:
         mock_input_agent,
         mock_system_responder,
         mock_movie_finder,
-        llm_recommendation_writer,
+        recommendation_writer,
         mock_evaluator,
     ):
         mock_input_agent.decide.return_value = InputDecision(
@@ -197,7 +197,7 @@ class TestMovieNightWorkflowWithEvaluator:
             system_responder=mock_system_responder,
             input_agent=mock_input_agent,
             movie_finder=mock_movie_finder,
-            recommendation_writer=llm_recommendation_writer,
+            recommendation_writer=recommendation_writer,
             evaluator=mock_evaluator,
         )
         result = workflow.invoke("Recommend a sci-fi movie")
@@ -212,7 +212,7 @@ class TestMovieNightWorkflowWithEvaluator:
         mock_input_agent,
         mock_system_responder,
         mock_movie_finder,
-        llm_recommendation_writer,
+        recommendation_writer,
         mock_evaluator,
     ):
         mock_input_agent.decide.return_value = InputDecision(
@@ -228,7 +228,7 @@ class TestMovieNightWorkflowWithEvaluator:
             system_responder=mock_system_responder,
             input_agent=mock_input_agent,
             movie_finder=mock_movie_finder,
-            recommendation_writer=llm_recommendation_writer,
+            recommendation_writer=recommendation_writer,
             evaluator=mock_evaluator,
         )
         result = workflow.invoke("how does this work?")
@@ -242,7 +242,7 @@ class TestMovieNightWorkflowWithEvaluator:
         mock_input_agent,
         mock_system_responder,
         mock_movie_finder,
-        llm_recommendation_writer,
+        recommendation_writer,
         mock_evaluator,
     ):
         mock_input_agent.decide.return_value = InputDecision(
@@ -258,7 +258,7 @@ class TestMovieNightWorkflowWithEvaluator:
             system_responder=mock_system_responder,
             input_agent=mock_input_agent,
             movie_finder=mock_movie_finder,
-            recommendation_writer=llm_recommendation_writer,
+            recommendation_writer=recommendation_writer,
             evaluator=mock_evaluator,
         )
         result = workflow.invoke("help")
@@ -272,7 +272,7 @@ class TestMovieNightWorkflowWithEvaluator:
         mock_input_agent,
         mock_system_responder,
         mock_movie_finder,
-        llm_recommendation_writer,
+        recommendation_writer,
         mock_evaluator,
     ):
         mock_input_agent.decide.return_value = InputDecision(
@@ -288,7 +288,7 @@ class TestMovieNightWorkflowWithEvaluator:
             system_responder=mock_system_responder,
             input_agent=mock_input_agent,
             movie_finder=mock_movie_finder,
-            recommendation_writer=llm_recommendation_writer,
+            recommendation_writer=recommendation_writer,
             evaluator=mock_evaluator,
         )
         result = workflow.invoke("Recommend nonexistent genre movies")
@@ -303,7 +303,7 @@ class TestMovieNightWorkflowWithEvaluator:
         mock_input_agent,
         mock_system_responder,
         mock_movie_finder,
-        llm_recommendation_writer,
+        recommendation_writer,
         mock_evaluator,
     ):
         mock_input_agent.decide.return_value = InputDecision(
@@ -331,7 +331,7 @@ class TestMovieNightWorkflowWithEvaluator:
             system_responder=mock_system_responder,
             input_agent=mock_input_agent,
             movie_finder=mock_movie_finder,
-            recommendation_writer=llm_recommendation_writer,
+            recommendation_writer=recommendation_writer,
             evaluator=mock_evaluator,
         )
 

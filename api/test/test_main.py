@@ -5,13 +5,13 @@ from fastapi.testclient import TestClient
 from langchain_openai import AzureChatOpenAI
 
 from app.agents import (
+    EvaluatorAgent,
     InputOrchestratorAgent,
-    LLMEvaluatorAgent,
-    LLMRAGAssistantAgent,
     InMemoryMovieFinderAgent,
+    RAGAssistantAgent,
+    RecommendationWriterAgent,
     SystemResponder,
 )
-from app.agents.recommendation_agent import LLMRecommendationWriterAgent
 from app.workflow import MovieNightWorkflow
 from app.main import app
 from app.rag.retriever import create_retriever
@@ -339,7 +339,7 @@ class TestIntegrationWithMockedLLM:
         writer_llm.invoke.return_value = MagicMock(
             content="A great pick for your movie night."
         )
-        writer = LLMRecommendationWriterAgent(writer_llm)
+        writer = RecommendationWriterAgent(writer_llm)
 
         evaluator_llm = MagicMock(spec=AzureChatOpenAI)
         structured = MagicMock()
@@ -351,7 +351,7 @@ class TestIntegrationWithMockedLLM:
             improvement_suggestions=[],
         )
         evaluator_llm.with_structured_output.return_value = structured
-        evaluator = LLMEvaluatorAgent(evaluator_llm)
+        evaluator = EvaluatorAgent(evaluator_llm)
         return writer, evaluator
 
     @pytest.fixture
@@ -407,7 +407,7 @@ class TestIntegrationWithMockedLLM:
             recommendation_writer=writer,
             evaluator=evaluator,
             rag_retriever=create_retriever(),
-            rag_agent=LLMRAGAssistantAgent(rag_llm),
+            rag_agent=RAGAssistantAgent(rag_llm),
         )
 
     @pytest.fixture
@@ -437,7 +437,7 @@ class TestIntegrationWithMockedLLM:
             recommendation_writer=writer,
             evaluator=evaluator,
             rag_retriever=create_retriever(),
-            rag_agent=LLMRAGAssistantAgent(rag_llm),
+            rag_agent=RAGAssistantAgent(rag_llm),
         )
 
     def test_movies_route_integration(self, offline_workflow_movies):

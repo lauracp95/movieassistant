@@ -5,7 +5,7 @@ from unittest.mock import MagicMock
 import pytest
 from langchain_openai import AzureChatOpenAI
 
-from app.agents.recommendation_agent import LLMRecommendationWriterAgent
+from app.agents.recommendation_agent import RecommendationWriterAgent
 from app.workflow.candidate_selector import (
     build_reasoning,
     filter_candidates,
@@ -182,10 +182,10 @@ class TestBuildReasoning:
         assert isinstance(reasoning, str) and reasoning
 
 
-class TestLLMRecommendationWriterAgent:
+class TestRecommendationWriterAgent:
     def test_returns_none_on_empty_candidates(self):
         llm = MagicMock(spec=AzureChatOpenAI)
-        writer = LLMRecommendationWriterAgent(llm)
+        writer = RecommendationWriterAgent(llm)
         result = writer.write(
             user_message="anything",
             constraints=Constraints(),
@@ -204,7 +204,7 @@ class TestLLMRecommendationWriterAgent:
             _movie("2", "Offtopic", genres=["drama"], rating=5.0),
         ]
 
-        writer = LLMRecommendationWriterAgent(llm)
+        writer = RecommendationWriterAgent(llm)
         result = writer.write(
             user_message="Recommend a sci-fi",
             constraints=Constraints(genres=["sci-fi"]),
@@ -228,7 +228,7 @@ class TestLLMRecommendationWriterAgent:
             overview="Dreams within dreams.",
         )
 
-        writer = LLMRecommendationWriterAgent(llm)
+        writer = RecommendationWriterAgent(llm)
         result = writer.write(
             user_message="Sci-fi please",
             constraints=Constraints(genres=["sci-fi"]),
@@ -245,7 +245,7 @@ class TestLLMRecommendationWriterAgent:
 
         movie = _movie("1", "Gravity", genres=["Drama"], rating=7.7)
 
-        writer = LLMRecommendationWriterAgent(llm)
+        writer = RecommendationWriterAgent(llm)
         result = writer.write(
             user_message="Something dramatic",
             constraints=Constraints(genres=["drama"]),
@@ -264,7 +264,7 @@ class TestLLMRecommendationWriterAgent:
             _movie("2", "Inception", genres=["sci-fi"], rating=8.8),
         ]
 
-        writer = LLMRecommendationWriterAgent(llm)
+        writer = RecommendationWriterAgent(llm)
         result = writer.write(
             user_message="Sci-fi please",
             constraints=Constraints(genres=["sci-fi"]),
@@ -277,7 +277,7 @@ class TestLLMRecommendationWriterAgent:
 
     def test_returns_none_when_all_rejected(self):
         llm = MagicMock(spec=AzureChatOpenAI)
-        writer = LLMRecommendationWriterAgent(llm)
+        writer = RecommendationWriterAgent(llm)
         movie = _movie("1", "Only", genres=["comedy"])
         result = writer.write(
             user_message="Comedy please",
@@ -301,7 +301,7 @@ class TestLLMRecommendationWriterAgent:
             year=1999,
             overview="A hacker discovers the truth.",
         )
-        writer = LLMRecommendationWriterAgent(llm)
+        writer = RecommendationWriterAgent(llm)
         result = writer.write(
             user_message="Give me sci-fi",
             constraints=Constraints(genres=["sci-fi"]),
@@ -318,7 +318,7 @@ class TestLLMRecommendationWriterAgent:
 
         worse = _movie("1", "Worse", genres=["comedy"], rating=5.0)
         better = _movie("2", "Better", genres=["comedy"], rating=9.0)
-        writer = LLMRecommendationWriterAgent(llm)
+        writer = RecommendationWriterAgent(llm)
         result = writer.write(
             user_message="Funny movie",
             constraints=Constraints(genres=["comedy"]),

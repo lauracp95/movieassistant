@@ -21,12 +21,12 @@ from app.schemas.domain import DraftRecommendation, EvaluationResult
 from app.schemas.input import Constraints
 
 if TYPE_CHECKING:
-    from app.agents import SystemResponder
     from app.agents import EvaluatorAgent
     from app.agents import InputOrchestratorAgent
-    from app.agents import MovieFinderAgent
     from app.agents import RAGAssistantAgent
     from app.agents import RecommendationWriterAgent
+    from app.agents import SystemResponder
+    from app.agents import MovieFinderAgent
     from app.rag.retriever import DocumentRetriever
 
 logger = logging.getLogger(__name__)

@@ -31,12 +31,12 @@ from app.workflow.routing import (
 from app.schemas.input import Constraints
 
 if TYPE_CHECKING:
-    from app.agents import SystemResponder
     from app.agents import EvaluatorAgent
     from app.agents import InputOrchestratorAgent
-    from app.agents import MovieFinderAgent
     from app.agents import RAGAssistantAgent
     from app.agents import RecommendationWriterAgent
+    from app.agents import SystemResponder
+    from app.agents import MovieFinderAgent
     from app.rag.retriever import DocumentRetriever
 
 logger = logging.getLogger(__name__)
@@ -67,7 +67,7 @@ class MovieNightWorkflow:
             system_responder: The SystemResponder for fallback non-movie routes.
             input_agent: The InputOrchestratorAgent for full route classification
                 (movies/rag/hybrid).
-            movie_finder: The MovieFinderAgent for candidate retrieval from TMDB.
+            movie_finder: The MovieFinderAgent for candidate retrieval from TMDB or in-memory.
                 If not provided, no movie candidates are retrieved.
             recommendation_writer: The RecommendationWriterAgent for grounded prose.
                 If provided, generates rich recommendation text instead of lists.
@@ -92,7 +92,7 @@ class MovieNightWorkflow:
     def _build_graph(self) -> StateGraph:
         """Build and compile the workflow graph.
 
-        If MovieFinderAgent is provided, adds candidate retrieval before
+        If a movie finder is provided, adds candidate retrieval before
         response generation. RAG retrieval and response nodes are added
         for system questions and hybrid routes when rag_retriever and
         rag_agent are provided.

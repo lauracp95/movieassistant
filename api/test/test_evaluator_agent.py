@@ -6,7 +6,7 @@ import pytest
 from langchain_openai import AzureChatOpenAI
 
 from app.workflow.candidate_selector import detect_constraint_violations
-from app.agents.evaluator_agent import LLMEvaluatorAgent
+from app.agents.evaluator_agent import EvaluatorAgent
 from app.schemas.domain import DraftRecommendation, EvaluationResult, MovieResult
 from app.schemas.input import Constraints
 
@@ -87,12 +87,12 @@ class TestDetectConstraintViolations:
         assert any("empty" in v for v in violations)
 
 
-class TestLLMEvaluatorDeterministicPrecheck:
-    def _evaluator(self) -> tuple[LLMEvaluatorAgent, MagicMock]:
+class TestEvaluatorDeterministicPrecheck:
+    def _evaluator(self) -> tuple[EvaluatorAgent, MagicMock]:
         llm = MagicMock(spec=AzureChatOpenAI)
         structured = MagicMock()
         llm.with_structured_output.return_value = structured
-        return LLMEvaluatorAgent(llm), structured
+        return EvaluatorAgent(llm), structured
 
     def test_passes_clean_draft_via_llm(self):
         evaluator, structured = self._evaluator()
@@ -183,13 +183,13 @@ class TestLLMEvaluatorDeterministicPrecheck:
         assert result.passed is True
 
 
-class TestLLMEvaluator:
+class TestEvaluatorAgent:
     def test_short_circuits_on_hard_violation_without_calling_llm(self):
         llm = MagicMock(spec=AzureChatOpenAI)
         structured = MagicMock()
         llm.with_structured_output.return_value = structured
 
-        evaluator = LLMEvaluatorAgent(llm)
+        evaluator = EvaluatorAgent(llm)
 
         draft = _draft(_movie("1", "Long", runtime_minutes=300))
         result = evaluator.evaluate(
@@ -215,7 +215,7 @@ class TestLLMEvaluator:
         )
         llm.with_structured_output.return_value = structured
 
-        evaluator = LLMEvaluatorAgent(llm)
+        evaluator = EvaluatorAgent(llm)
         draft = _draft(_movie("1", "Clean", runtime_minutes=100))
 
         result = evaluator.evaluate(
@@ -235,7 +235,7 @@ class TestLLMEvaluator:
         structured.invoke.side_effect = RuntimeError("boom")
         llm.with_structured_output.return_value = structured
 
-        evaluator = LLMEvaluatorAgent(llm)
+        evaluator = EvaluatorAgent(llm)
         draft = _draft(_movie("1", "Clean", runtime_minutes=100))
 
         result = evaluator.evaluate(
@@ -259,7 +259,7 @@ class TestLLMEvaluator:
         )
         llm.with_structured_output.return_value = structured
 
-        evaluator = LLMEvaluatorAgent(llm)
+        evaluator = EvaluatorAgent(llm)
         draft = _draft(
             _movie("1", "The Matrix", genres=["sci-fi"], rating=8.7),
             text="Watch The Matrix, a grounded sci-fi pick.",

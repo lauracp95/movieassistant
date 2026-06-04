@@ -96,7 +96,7 @@ uv run python -m pytest
 
 Tests do not call Azure OpenAI or TMDB by default:
 
-- **Writer, evaluator, and RAG agents**: `unittest.mock.MagicMock` stands in for the LangChain chat model (`api/test/conftest.py` fixtures `llm_recommendation_writer`, `llm_evaluator`, `llm_rag_agent`).
+- **Writer, evaluator, and RAG agents**: `unittest.mock.MagicMock` stands in for the LangChain chat model (`api/test/conftest.py` fixtures `recommendation_writer`, `evaluator`, `rag_agent`).
 - **Input orchestrator and system responder**: mocked at the agent interface where the workflow is under test.
 - **Movie finder**: `InMemoryMovieFinderAgent` provides a fixed in-memory catalog (same implementation used when `MOVIE_FINDER_MODE=inmemory` or no `TMDB_API_KEY` in production).
 
@@ -203,7 +203,7 @@ Retry and pass rules live in `api/app/workflow/state.py`:
 - `MAX_RETRIES`: maximum evaluation failures before the safe fallback response
 - `PASS_THRESHOLD`: minimum evaluator score (combined with the evaluator’s `passed` flag) to accept a draft
 
-The production app wires `LLMRecommendationWriterAgent`, `LLMEvaluatorAgent`, and `LLMRAGAssistantAgent` in `api/app/main.py`. Only the movie finder has a non-LLM fallback (`InMemoryMovieFinderAgent` when TMDB is unavailable).
+The production app wires `RecommendationWriterAgent`, `EvaluatorAgent`, and `RAGAssistantAgent` in `api/app/main.py` (each takes a mocked LLM in tests). Only the movie finder has a non-LLM implementation (`InMemoryMovieFinderAgent` when TMDB is unavailable).
 
 ## Project Structure
 
