@@ -17,6 +17,8 @@ from app.agents import (
 )
 from app.routers.routes import cleanup_workflow, initialize_workflow, router
 from app.integrations.tmdb_client import TMDBClient
+from langchain_openai import AzureOpenAIEmbeddings
+
 from app.llm import create_chat_model
 from app.observability import configure_langsmith, get_tracing_status
 from app.rag.retriever import create_retriever
@@ -96,10 +98,21 @@ async def lifespan(app: FastAPI):
         recommendation_writer = RecommendationWriterAgent(writer_llm)
         evaluator = EvaluatorAgent(evaluator_llm)
 
-        rag_retriever = create_retriever()
+        embeddings = AzureOpenAIEmbeddings(
+            azure_endpoint=settings.azure_openai_endpoint,
+            api_key=settings.azure_openai_api_key,
+            api_version=settings.azure_openai_api_version,
+            azure_deployment=settings.azure_openai_embeddings_deployment,
+        )
+        rag_retriever = create_retriever(
+            embeddings=embeddings,
+            persist_directory=settings.chroma_persist_directory,
+            collection_name=settings.chroma_collection_name,
+        )
         rag_agent = RAGAssistantAgent(rag_llm)
         logger.info(
-            f"RAG retriever initialized with {len(rag_retriever._documents)} documents"
+            "RAG retriever initialized with %d document chunks",
+            len(rag_retriever._documents),
         )
 
         workflow = MovieNightWorkflow(

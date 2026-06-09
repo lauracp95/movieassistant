@@ -4,10 +4,12 @@ This package provides document retrieval capabilities for answering
 questions about the system using internal documentation.
 """
 
+from app.rag.chroma_store import ChromaDocumentStore
 from app.rag.ingest import DocumentIngester, KnowledgeDocument
 from app.rag.retriever import DocumentRetriever
 
 __all__ = [
+    "ChromaDocumentStore",
     "DocumentIngester",
     "DocumentRetriever",
     "KnowledgeDocument",

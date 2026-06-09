@@ -11,12 +11,15 @@ class Settings(BaseSettings):
         - AZURE_OPENAI_API_KEY: Azure OpenAI API key
         - AZURE_OPENAI_API_VERSION: API version (e.g., 2024-02-15-preview)
         - AZURE_OPENAI_DEPLOYMENT: Deployment name of the chat model
+        - AZURE_OPENAI_EMBEDDINGS_DEPLOYMENT: Deployment name for the text-embedding model
 
     Optional:
         - TEMPERATURE: Model temperature (default: 0.7)
         - MAX_TOKENS: Maximum tokens in response (optional)
         - TMDB_API_KEY: TMDB API key for movie retrieval (optional, uses in-memory catalog if not set)
         - MOVIE_FINDER_MODE: "tmdb", "inmemory", or "auto" (default: auto)
+        - CHROMA_PERSIST_DIRECTORY: Directory for ChromaDB persistence (default: None = in-memory)
+        - CHROMA_COLLECTION_NAME: Name of the ChromaDB collection (default: knowledge_base)
 
     Optional (LangSmith tracing; both LANGCHAIN_TRACING_V2 and LANGCHAIN_API_KEY
     must be set for tracing to activate — see langsmith_enabled):
@@ -43,7 +46,11 @@ class Settings(BaseSettings):
         ...,
         description="Azure OpenAI deployment name for the chat model"
     )
-    
+    azure_openai_embeddings_deployment: str = Field(
+        ...,
+        description="Azure OpenAI deployment name for the text-embedding model (used by the RAG retriever)"
+    )
+
     # Optional fields with defaults
     temperature: float = Field(
         default=0.7,
@@ -67,7 +74,17 @@ class Settings(BaseSettings):
         default="auto",
         description="Movie finder mode: 'tmdb', 'inmemory', or 'auto' (auto-detect based on API key)"
     )
-    
+
+    # ChromaDB / RAG retriever (optional)
+    chroma_persist_directory: str | None = Field(
+        default=None,
+        description="Directory for ChromaDB persistence. None = ephemeral in-memory collection."
+    )
+    chroma_collection_name: str = Field(
+        default="knowledge_base",
+        description="Name of the ChromaDB collection used by the RAG retriever"
+    )
+
     # LangSmith observability (optional)
     langchain_tracing_v2: bool = Field(
         default=False,

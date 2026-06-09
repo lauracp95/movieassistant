@@ -1,5 +1,8 @@
 """Unit tests for RAG retriever, ingest, and agent components."""
 
+import hashlib
+import os
+import uuid
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import MagicMock
@@ -17,6 +20,25 @@ from app.rag.retriever import (
     create_retriever,
 )
 from app.schemas.domain import RetrievedContext
+
+
+class FakeEmbeddings:
+    """Deterministic hash-based embeddings for unit tests (no Azure calls)."""
+
+    def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        return [self._embed(t) for t in texts]
+
+    def embed_query(self, text: str) -> list[float]:
+        return self._embed(text)
+
+    def _embed(self, text: str) -> list[float]:
+        digest = hashlib.md5(text.encode()).digest()
+        return [float(b) / 255.0 for b in digest]
+
+
+def unique_collection() -> str:
+    """Return a unique ChromaDB collection name to isolate each test."""
+    return f"test_{uuid.uuid4().hex}"
 
 
 class TestDocumentIngester:
@@ -123,33 +145,37 @@ class TestDocumentRetriever:
     def test_retrieve_returns_empty_list_when_no_documents(self):
         with TemporaryDirectory() as tmpdir:
             ingester = DocumentIngester(knowledge_base_path=Path(tmpdir))
-            retriever = DocumentRetriever(ingester=ingester)
-
+            retriever = DocumentRetriever(
+                ingester=ingester,
+                embeddings=FakeEmbeddings(),
+                collection_name=unique_collection(),
+            )
             results = retriever.retrieve("any query")
             assert results == []
 
-    def test_retrieve_finds_relevant_documents(self):
+    def test_retrieve_returns_results_for_valid_query(self):
         with TemporaryDirectory() as tmpdir:
             (Path(tmpdir) / "movies.md").write_text(
-                "# Movies\n\n" +
-                "This comprehensive document covers movies recommendations viewers cinema " +
-                "films entertainment watching suggestions picks choices selections."
+                "# Movies\n\nThis document covers movie recommendations."
             )
             (Path(tmpdir) / "system.md").write_text(
-                "# System\n\n" +
-                "This detailed document explains system architecture design software " +
-                "engineering infrastructure deployment scalability performance."
+                "# System\n\nThis document explains system architecture."
             )
 
             ingester = DocumentIngester(knowledge_base_path=Path(tmpdir))
-            retriever = DocumentRetriever(ingester=ingester, top_k=2, min_score=0.0)
+            retriever = DocumentRetriever(
+                ingester=ingester,
+                embeddings=FakeEmbeddings(),
+                top_k=2,
+                min_score=0.0,
+                collection_name=unique_collection(),
+            )
             retriever.initialize()
 
-            results = retriever.retrieve("movies recommendations viewers cinema films")
+            results = retriever.retrieve("movie recommendations")
 
             assert len(results) >= 1
-            movie_results = [r for r in results if "movies" in r.content.lower()]
-            assert len(movie_results) >= 1
+            assert len(results) <= 2
 
     def test_retrieve_respects_top_k(self):
         with TemporaryDirectory() as tmpdir:
@@ -159,12 +185,38 @@ class TestDocumentRetriever:
                 )
 
             ingester = DocumentIngester(knowledge_base_path=Path(tmpdir))
-            retriever = DocumentRetriever(ingester=ingester, top_k=2)
+            retriever = DocumentRetriever(
+                ingester=ingester,
+                embeddings=FakeEmbeddings(),
+                top_k=2,
+                collection_name=unique_collection(),
+            )
             retriever.initialize()
 
             results = retriever.retrieve("document topics")
 
             assert len(results) <= 2
+
+    def test_retrieve_respects_top_k_override(self):
+        with TemporaryDirectory() as tmpdir:
+            for i in range(5):
+                (Path(tmpdir) / f"doc{i}.md").write_text(
+                    f"# Document {i}\n\nContent for document {i}."
+                )
+
+            ingester = DocumentIngester(knowledge_base_path=Path(tmpdir))
+            retriever = DocumentRetriever(
+                ingester=ingester,
+                embeddings=FakeEmbeddings(),
+                top_k=5,
+                min_score=0.0,
+                collection_name=unique_collection(),
+            )
+            retriever.initialize()
+
+            results = retriever.retrieve("document content", top_k=1)
+
+            assert len(results) <= 1
 
     def test_retrieve_returns_retrieved_context_objects(self):
         with TemporaryDirectory() as tmpdir:
@@ -173,7 +225,12 @@ class TestDocumentRetriever:
             )
 
             ingester = DocumentIngester(knowledge_base_path=Path(tmpdir))
-            retriever = DocumentRetriever(ingester=ingester)
+            retriever = DocumentRetriever(
+                ingester=ingester,
+                embeddings=FakeEmbeddings(),
+                min_score=0.0,
+                collection_name=unique_collection(),
+            )
             retriever.initialize()
 
             results = retriever.retrieve("testing retrieval")
@@ -183,18 +240,63 @@ class TestDocumentRetriever:
                 assert isinstance(r, RetrievedContext)
                 assert r.source == "rag"
                 assert r.relevance_score is not None
+                assert 0.0 <= r.relevance_score <= 1.0
                 assert "title" in r.metadata
 
-    def test_retrieve_empty_query_returns_empty(self):
+    def test_retrieve_empty_string_returns_empty(self):
         with TemporaryDirectory() as tmpdir:
             (Path(tmpdir) / "test.md").write_text("# Test\n\nContent.")
 
             ingester = DocumentIngester(knowledge_base_path=Path(tmpdir))
-            retriever = DocumentRetriever(ingester=ingester)
+            retriever = DocumentRetriever(
+                ingester=ingester,
+                embeddings=FakeEmbeddings(),
+                collection_name=unique_collection(),
+            )
             retriever.initialize()
 
-            results = retriever.retrieve("the a an is")
+            results = retriever.retrieve("")
             assert results == []
+
+    def test_retrieve_whitespace_only_query_returns_empty(self):
+        with TemporaryDirectory() as tmpdir:
+            (Path(tmpdir) / "test.md").write_text("# Test\n\nContent.")
+
+            ingester = DocumentIngester(knowledge_base_path=Path(tmpdir))
+            retriever = DocumentRetriever(
+                ingester=ingester,
+                embeddings=FakeEmbeddings(),
+                collection_name=unique_collection(),
+            )
+            retriever.initialize()
+
+            results = retriever.retrieve("   ")
+            assert results == []
+
+    def test_retrieve_preserves_metadata(self):
+        with TemporaryDirectory() as tmpdir:
+            (Path(tmpdir) / "my_doc.md").write_text(
+                "# My Great Document\n\nSome content here."
+            )
+
+            ingester = DocumentIngester(knowledge_base_path=Path(tmpdir))
+            retriever = DocumentRetriever(
+                ingester=ingester,
+                embeddings=FakeEmbeddings(),
+                min_score=0.0,
+                collection_name=unique_collection(),
+            )
+            retriever.initialize()
+
+            results = retriever.retrieve("content")
+
+            assert len(results) >= 1
+            meta = results[0].metadata
+            assert meta["title"] == "My Great Document"
+            assert meta["source_file"] == "my_doc.md"
+            assert "chunk_index" in meta
+            assert "total_chunks" in meta
+            assert "file_path" in meta
 
     def test_retrieve_all_returns_all_documents(self):
         with TemporaryDirectory() as tmpdir:
@@ -202,7 +304,11 @@ class TestDocumentRetriever:
                 (Path(tmpdir) / f"doc{i}.md").write_text(f"# Doc {i}\n\nContent {i}.")
 
             ingester = DocumentIngester(knowledge_base_path=Path(tmpdir))
-            retriever = DocumentRetriever(ingester=ingester)
+            retriever = DocumentRetriever(
+                ingester=ingester,
+                embeddings=FakeEmbeddings(),
+                collection_name=unique_collection(),
+            )
             retriever.initialize()
 
             results = retriever.retrieve_all()
@@ -210,24 +316,84 @@ class TestDocumentRetriever:
             assert len(results) == 3
             for r in results:
                 assert r.relevance_score == 1.0
+                assert r.source == "rag"
+
+    def test_retrieve_all_preserves_metadata(self):
+        with TemporaryDirectory() as tmpdir:
+            (Path(tmpdir) / "sample.md").write_text("# Sample\n\nA short document.")
+
+            ingester = DocumentIngester(knowledge_base_path=Path(tmpdir))
+            retriever = DocumentRetriever(
+                ingester=ingester,
+                embeddings=FakeEmbeddings(),
+                collection_name=unique_collection(),
+            )
+            retriever.initialize()
+
+            results = retriever.retrieve_all()
+
+            assert len(results) == 1
+            meta = results[0].metadata
+            assert meta["title"] == "Sample"
+            assert meta["source_file"] == "sample.md"
 
     def test_auto_initialize_on_first_retrieve(self):
         with TemporaryDirectory() as tmpdir:
             (Path(tmpdir) / "test.md").write_text("# Test\n\nContent.")
 
             ingester = DocumentIngester(knowledge_base_path=Path(tmpdir))
-            retriever = DocumentRetriever(ingester=ingester)
+            retriever = DocumentRetriever(
+                ingester=ingester,
+                embeddings=FakeEmbeddings(),
+                collection_name=unique_collection(),
+            )
 
             assert not retriever._initialized
             retriever.retrieve("anything")
             assert retriever._initialized
+
+    def test_initialize_is_idempotent(self):
+        with TemporaryDirectory() as tmpdir:
+            (Path(tmpdir) / "test.md").write_text("# Test\n\nContent.")
+
+            ingester = DocumentIngester(knowledge_base_path=Path(tmpdir))
+            retriever = DocumentRetriever(
+                ingester=ingester,
+                embeddings=FakeEmbeddings(),
+                collection_name=unique_collection(),
+            )
+
+            retriever.initialize()
+            retriever.initialize()
+
+            assert retriever._initialized
+            assert len(retriever._documents) >= 1
+
+    def test_empty_knowledge_base_does_not_crash(self):
+        with TemporaryDirectory() as tmpdir:
+            ingester = DocumentIngester(knowledge_base_path=Path(tmpdir))
+            retriever = DocumentRetriever(
+                ingester=ingester,
+                embeddings=FakeEmbeddings(),
+                collection_name=unique_collection(),
+            )
+            retriever.initialize()
+
+            assert retriever._initialized
+            assert retriever._store is None
+            assert retriever.retrieve("any query") == []
+            assert retriever.retrieve_all() == []
 
     def test_create_retriever_factory_function(self):
         with TemporaryDirectory() as tmpdir:
             (Path(tmpdir) / "test.md").write_text("# Test\n\nContent.")
 
             ingester = DocumentIngester(knowledge_base_path=Path(tmpdir))
-            retriever = create_retriever(ingester=ingester)
+            retriever = create_retriever(
+                ingester=ingester,
+                embeddings=FakeEmbeddings(),
+                collection_name=unique_collection(),
+            )
 
             assert retriever._initialized
             assert len(retriever._documents) >= 1
@@ -299,6 +465,9 @@ class TestRAGAssistantAgent:
         assert "No relevant documentation found" in user_message
 
 
+_AZURE_EMBEDDINGS_CONFIGURED = bool(os.getenv("AZURE_OPENAI_EMBEDDINGS_DEPLOYMENT"))
+
+
 class TestKnowledgeBaseFiles:
     """Test that the actual knowledge base files exist and can be loaded."""
 
@@ -336,6 +505,42 @@ class TestKnowledgeBaseFiles:
             source_docs = [d for d in docs if d.source == source]
             assert source_docs[0].title, f"Document {source} has no title"
 
+    def test_knowledge_base_retriever_initializes_with_fake_embeddings(self):
+        from app.rag.ingest import DEFAULT_KNOWLEDGE_BASE_PATH
+
+        ingester = DocumentIngester(knowledge_base_path=DEFAULT_KNOWLEDGE_BASE_PATH)
+        retriever = create_retriever(
+            ingester=ingester,
+            embeddings=FakeEmbeddings(),
+            min_score=0.0,
+            collection_name=unique_collection(),
+        )
+
+        assert retriever._initialized
+        assert len(retriever._documents) >= 6
+
+    def test_retrieve_all_returns_all_kb_documents(self):
+        from app.rag.ingest import DEFAULT_KNOWLEDGE_BASE_PATH
+
+        ingester = DocumentIngester(knowledge_base_path=DEFAULT_KNOWLEDGE_BASE_PATH)
+        retriever = create_retriever(
+            ingester=ingester,
+            embeddings=FakeEmbeddings(),
+            collection_name=unique_collection(),
+        )
+
+        results = retriever.retrieve_all()
+
+        assert len(results) >= 6
+        for r in results:
+            assert r.relevance_score == 1.0
+            assert r.metadata.get("title")
+            assert r.metadata.get("source_file")
+
+    @pytest.mark.skipif(
+        not _AZURE_EMBEDDINGS_CONFIGURED,
+        reason="Requires AZURE_OPENAI_EMBEDDINGS_DEPLOYMENT and Azure credentials",
+    )
     def test_retriever_finds_system_overview(self):
         retriever = create_retriever()
 
@@ -345,6 +550,10 @@ class TestKnowledgeBaseFiles:
         sources = [r.metadata.get("source_file", "") for r in results]
         assert any("system_overview" in s for s in sources)
 
+    @pytest.mark.skipif(
+        not _AZURE_EMBEDDINGS_CONFIGURED,
+        reason="Requires AZURE_OPENAI_EMBEDDINGS_DEPLOYMENT and Azure credentials",
+    )
     def test_retriever_finds_limitations(self):
         retriever = create_retriever()
 
@@ -354,6 +563,10 @@ class TestKnowledgeBaseFiles:
         contents = " ".join(r.content.lower() for r in results)
         assert "limitation" in contents or "memory" in contents
 
+    @pytest.mark.skipif(
+        not _AZURE_EMBEDDINGS_CONFIGURED,
+        reason="Requires AZURE_OPENAI_EMBEDDINGS_DEPLOYMENT and Azure credentials",
+    )
     def test_retriever_finds_evaluation_logic(self):
         retriever = create_retriever()
 
