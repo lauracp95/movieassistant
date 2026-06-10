@@ -17,8 +17,8 @@ class TestShouldRespond:
     def test_should_respond_movies(self):
         assert should_respond({"route": "movies"}) == "respond"
 
-    def test_should_respond_system(self):
-        assert should_respond({"route": "system"}) == "respond"
+    def test_should_respond_unknown_route(self):
+        assert should_respond({"route": "unknown"}) == "respond"
 
     def test_should_respond_rag(self):
         assert should_respond({"route": "rag"}) == "respond"

@@ -128,11 +128,11 @@ def test_chat_hybrid_route():
         mock_workflow.invoke.assert_called_once_with("Horror movies for Halloween and their history")
 
 
-def test_chat_system_route_maps_to_rag():
+def test_chat_rag_route():
     mock_workflow = MagicMock(spec=MovieNightWorkflow)
     mock_workflow.invoke.return_value = {
         "final_response": "This app uses Azure OpenAI to help with movies.",
-        "route": "system",
+        "route": "rag",
         "constraints": Constraints(),
         "retrieved_contexts": [],
         "draft_recommendation": None,

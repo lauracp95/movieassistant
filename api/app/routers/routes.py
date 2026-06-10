@@ -160,8 +160,6 @@ def chat(request: ChatRequest) -> ChatResponse:
                 route_value = route
             elif route == "clarification":
                 route_value = "movies"
-            elif route == "system":
-                route_value = "rag"
 
             debug_info = _build_debug_info(result)
 

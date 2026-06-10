@@ -149,7 +149,7 @@ class RouteDecision(BaseModel):
     Determines how a user message should be processed.
     """
 
-    route: Literal["movies", "system", "clarification"] = Field(
+    route: Literal["movies", "rag", "hybrid", "clarification"] = Field(
         ...,
         description="Target route for processing",
     )

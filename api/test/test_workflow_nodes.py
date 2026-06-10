@@ -203,7 +203,7 @@ class TestRespondNode:
         assert result == {}
         mock_system_responder.respond.assert_not_called()
 
-    def test_respond_system_route_fallback(
+    def test_respond_unknown_route_fallback(
         self, mock_system_responder
     ):
         mock_system_responder.respond.return_value = "Fallback response"

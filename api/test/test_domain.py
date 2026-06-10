@@ -143,10 +143,14 @@ class TestRouteDecision:
         assert decision.confidence == 0.95
         assert decision.clarification_needed is False
 
-    def test_system_route(self):
-        decision = RouteDecision(route="system")
-        assert decision.route == "system"
+    def test_rag_route(self):
+        decision = RouteDecision(route="rag")
+        assert decision.route == "rag"
         assert decision.confidence is None
+
+    def test_hybrid_route(self):
+        decision = RouteDecision(route="hybrid")
+        assert decision.route == "hybrid"
 
     def test_clarification_route(self):
         decision = RouteDecision(
