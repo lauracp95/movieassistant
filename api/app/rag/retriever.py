@@ -60,10 +60,6 @@ class DocumentRetriever:
         self._store: ChromaDocumentStore | None = None
         self._initialized = False
 
-    # ------------------------------------------------------------------
-    # Public API
-    # ------------------------------------------------------------------
-
     def initialize(self) -> None:
         """Load documents and set up the vector store.
 

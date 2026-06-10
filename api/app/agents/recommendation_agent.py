@@ -13,6 +13,7 @@ from app.workflow.candidate_selector import (
     build_reasoning,
     select_best_candidate,
 )
+from app.workflow.formatters import format_constraints, format_movie
 from app.llm.prompts import RECOMMENDATION_WRITER_SYSTEM_PROMPT
 from app.schemas.domain import DraftRecommendation, MovieResult
 from app.schemas.input import Constraints
@@ -97,8 +98,8 @@ class RecommendationWriterAgent:
         movie: MovieResult,
         rejected_titles: list[str] | None,
     ) -> str:
-        constraints_text = self._format_constraints(constraints)
-        movie_block = self._format_movie(movie)
+        constraints_text = format_constraints(constraints)
+        movie_block = format_movie(movie)
         rejected_block = ", ".join(rejected_titles) if rejected_titles else "(none)"
 
         return (
@@ -109,31 +110,3 @@ class RecommendationWriterAgent:
             "Write the recommendation text now."
         )
 
-    def _format_constraints(self, constraints: Constraints) -> str:
-        lines: list[str] = []
-        if constraints.genres:
-            lines.append(f"- genres: {', '.join(constraints.genres)}")
-        if constraints.max_runtime_minutes:
-            lines.append(f"- max runtime: {constraints.max_runtime_minutes} min")
-        if constraints.min_runtime_minutes:
-            lines.append(f"- min runtime: {constraints.min_runtime_minutes} min")
-        return "\n".join(lines) if lines else "- (none detected)"
-
-    def _format_movie(self, movie: MovieResult) -> str:
-        lines = [
-            f"- title: {movie.title}",
-            f"- year: {movie.year if movie.year is not None else 'unknown'}",
-            f"- genres: {', '.join(movie.genres) if movie.genres else 'unknown'}",
-            (
-                f"- runtime: {movie.runtime_minutes} min"
-                if movie.runtime_minutes is not None
-                else "- runtime: unknown"
-            ),
-            (
-                f"- rating: {movie.rating:.1f}/10"
-                if movie.rating is not None
-                else "- rating: unknown"
-            ),
-            f"- overview: {movie.overview or 'not available'}",
-        ]
-        return "\n".join(lines)

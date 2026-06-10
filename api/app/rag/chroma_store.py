@@ -47,10 +47,6 @@ class ChromaDocumentStore:
         self._collection_name = collection_name
         self._chroma: Chroma | None = None
 
-    # ------------------------------------------------------------------
-    # Public API
-    # ------------------------------------------------------------------
-
     def setup(self, documents: list[KnowledgeDocument]) -> None:
         """Open (or create) the collection and index documents if it is empty.
 
@@ -117,10 +113,6 @@ class ChromaDocumentStore:
             logger.info("No chunks met the minimum relevance threshold (%.2f)", min_score)
 
         return contexts
-
-    # ------------------------------------------------------------------
-    # Internal helpers
-    # ------------------------------------------------------------------
 
     def _create_client(self) -> chromadb.ClientAPI:
         """Return a persistent or ephemeral ChromaDB client."""

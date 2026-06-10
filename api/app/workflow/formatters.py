@@ -9,6 +9,37 @@ from app.schemas.domain import MovieResult
 from app.schemas.input import Constraints
 
 
+def format_constraints(constraints: Constraints) -> str:
+    lines: list[str] = []
+    if constraints.genres:
+        lines.append(f"- genres: {', '.join(constraints.genres)}")
+    if constraints.max_runtime_minutes:
+        lines.append(f"- max runtime: {constraints.max_runtime_minutes} min")
+    if constraints.min_runtime_minutes:
+        lines.append(f"- min runtime: {constraints.min_runtime_minutes} min")
+    return "\n".join(lines) if lines else "- (none detected)"
+
+
+def format_movie(movie: MovieResult) -> str:
+    lines = [
+        f"- title: {movie.title}",
+        f"- year: {movie.year if movie.year is not None else 'unknown'}",
+        f"- genres: {', '.join(movie.genres) if movie.genres else 'unknown'}",
+        (
+            f"- runtime: {movie.runtime_minutes} min"
+            if movie.runtime_minutes is not None
+            else "- runtime: unknown"
+        ),
+        (
+            f"- rating: {movie.rating:.1f}/10"
+            if movie.rating is not None
+            else "- rating: unknown"
+        ),
+        f"- overview: {movie.overview or 'not available'}",
+    ]
+    return "\n".join(lines)
+
+
 def format_candidate_list_response(
     candidates: list[MovieResult],
     constraints: Constraints,
