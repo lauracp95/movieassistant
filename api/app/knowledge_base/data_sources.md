@@ -39,16 +39,23 @@ Movies are discovered through TMDB's genre-based discovery API:
 
 ### Model Usage
 - GPT-4 models power all natural language processing
-- Different temperature settings for different tasks:
-  - `0.0` for classification (deterministic)
-  - `0.3` for recommendation writing (slight creativity)
-  - `0.7` for general responses (conversational)
+- Each agent uses a fixed temperature appropriate to its task:
+
+| Task | Temperature | Rationale |
+|------|-------------|-----------|
+| Input classification (InputOrchestratorAgent) | `0.0` | Deterministic routing |
+| Quality evaluation (EvaluatorAgent) | `0.0` | Deterministic judgment |
+| Guardrail classification (GuardrailService) | `0.0` | Deterministic safety checks |
+| Recommendation writing (RecommendationWriterAgent) | `0.3` | Slight creativity |
+| RAG answer generation (RAGAssistantAgent) | `0.3` | Grounded but natural |
 
 ### What LLMs Provide
 - Intent classification (movies vs. system questions)
 - Constraint extraction from natural language
+- Rich search signal extraction (actors, directors, year, keywords, mood, setting, language)
 - Recommendation text generation
 - Quality evaluation
+- Guardrail classification (injection detection, off-topic detection)
 
 ### What LLMs Don't Provide
 - Movie data (comes from TMDB)
@@ -58,15 +65,15 @@ Movies are discovered through TMDB's genre-based discovery API:
 ## Internal Knowledge Base
 
 ### RAG Documents
-For system questions, the assistant uses internal documentation:
+For system questions, the assistant uses internal documentation stored in ChromaDB:
 - System architecture explanations
 - Feature descriptions
 - Known limitations
 - Routing logic details
 
 ### Document Retrieval
-- Simple semantic search over markdown documents
-- Relevant chunks are retrieved based on query similarity
+- Semantic search using Azure OpenAI embeddings stored in ChromaDB
+- Top-3 relevant chunks are retrieved based on query similarity
 - Answers are grounded in retrieved documentation
 
 ## Data Flow Summary
@@ -74,6 +81,8 @@ For system questions, the assistant uses internal documentation:
 ```
 User Message
     ↓
+GuardrailService (length / injection / off-topic check)
+    ↓ (if allowed)
 InputOrchestratorAgent (LLM)
     ↓
 ┌─────────────────────────────────────┐
@@ -84,7 +93,7 @@ InputOrchestratorAgent (LLM)
 └─────────────────────────────────────┘
 ┌─────────────────────────────────────┐
 │  Route: rag                         │
-│  → RAG retrieval from knowledge base│
+│  → ChromaDB semantic retrieval      │
 │  → RAGAssistantAgent (LLM)          │
 └─────────────────────────────────────┘
     ↓

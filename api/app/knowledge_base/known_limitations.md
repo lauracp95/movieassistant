@@ -55,13 +55,15 @@
 - Very restrictive constraints may exhaust all candidates
 - Obscure genre combinations may have limited matches
 
+### Message Length Limit
+- Messages exceeding the guardrail character limit (default: 2000) are blocked
+- Very long requests should be broken into shorter messages
+
 ## What the System Cannot Do
 
 - Provide streaming links or purchase options
 - Remember previous conversations
 - Learn from user feedback
-- Search by actor, director, or crew
-- Filter by release year ranges
 - Provide movie trailers or clips
 - Compare multiple movies in detail
 - Explain detailed plot points beyond TMDB overview

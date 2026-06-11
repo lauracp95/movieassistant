@@ -6,32 +6,38 @@ A chat assistant for planning movie nights, powered by Azure OpenAI via LangChai
 
 - **Backend**: FastAPI application with `/health` and `/chat` endpoints
 - **Frontend**: Streamlit chat interface with debug info panel
-- **LLM**: Azure OpenAI via LangChain (separate model instances for routing, writing, evaluation, and RAG)
+- **LLM**: Azure OpenAI via LangChain (separate model instances for routing, writing, evaluation, RAG, and guardrails)
 - **Workflow**: LangGraph `StateGraph` (`MovieNightWorkflow`) coordinating nodes and conditional edges
-- **Input Orchestrator Agent**: Routes to `movies`, `rag`, or `hybrid`; extracts constraints; may ask for clarification
+- **Guardrail Service**: Pre-workflow safety layer that blocks messages exceeding the length limit, matching injection patterns, or identified as off-topic by LLM classification
+- **Input Orchestrator Agent**: Routes to `movies`, `rag`, or `hybrid`; extracts constraints and rich search signals (actors, directors, year, keywords, mood, setting, language); may ask for clarification
 - **Movie Finder Agent**: Retrieves candidate movies from TMDB, or an in-memory catalog when no API key is configured (`InMemoryMovieFinderAgent`)
 - **Recommendation Writer Agent**: Selects a candidate and produces recommendation prose grounded in movie metadata
 - **Evaluator Agent**: Validates drafts against constraints and quality criteria; on failure the workflow retries (up to `MAX_RETRIES`) and accumulates **rejected titles** so the writer avoids repeating bad picks; exhausted retries yield a safe fallback message
 - **RAG Assistant Agent**: Answers system questions using retrieved documentation from the knowledge base
-- **Document Retriever**: TF-IDF based retrieval over markdown knowledge base files
+- **Document Retriever**: ChromaDB vector store with Azure OpenAI embeddings for semantic search over markdown knowledge base files
 - **LangSmith** (optional): Traces LLM calls and `/chat` workflow runs when `LANGCHAIN_TRACING_V2` and `LANGCHAIN_API_KEY` are set
 
 ## How It Works
 
 1. User sends a message to `/chat`
-2. **Input Orchestrator** analyzes the message:
+2. **Guardrail Service** inspects the message:
+   - Blocks if message exceeds `GUARDRAIL_MAX_MESSAGE_LENGTH` characters
+   - Blocks if a hard injection pattern matches
+   - Blocks if the LLM classifies the message as a prompt injection or off-topic
+3. **Input Orchestrator** analyzes the message:
    - Chooses route: `movies`, `rag`, `hybrid`, or clarification
    - Extracts constraints (genres, runtime) when relevant
+   - Extracts rich search signals: actors, directors, year/year range, keywords, mood, setting, language
    - Sets `rag_query` for knowledge-style questions
-3. **Clarification** ends early with a direct reply.
-4. **`rag`** retrieves relevant documents from the knowledge base and generates a grounded answer via the RAG Assistant Agent.
-5. **`movies`** runs **Find movies** → **Write recommendation** → **Evaluate** (when an evaluator is configured):
+4. **Clarification** ends early with a direct reply.
+5. **`rag`** retrieves relevant documents from the knowledge base and generates a grounded answer via the RAG Assistant Agent.
+6. **`movies`** runs **Find movies** → **Write recommendation** → **Evaluate** (when an evaluator is configured):
    - The finder can exclude titles in `rejected_titles`
    - If evaluation fails, the draft is cleared, the failed title is added to `rejected_titles`, `retry_count` increments, and the graph loops back to **Write recommendation** while under `MAX_RETRIES`
    - If retries are exhausted (or there is no viable draft), **Respond** uses a polite fallback instead of a low-quality recommendation
-6. **`hybrid`** combines both flows: **Find movies** → **RAG retrieve** → **Write recommendation** → **Evaluate** → **Respond**
-7. **Respond** returns final text (draft text when evaluation passed, RAG answer, or formatted candidates as appropriate)
-8. The API returns the reply plus route and extracted constraints
+7. **`hybrid`** combines both flows: **Find movies** → **RAG retrieve** → **Write recommendation** → **Evaluate** → **Respond**
+8. **Respond** returns final text (draft text when evaluation passed, RAG answer, or formatted candidates as appropriate)
+9. The API returns the reply plus route and extracted constraints
 
 ## Required Environment Variables
 
@@ -41,11 +47,16 @@ A chat assistant for planning movie nights, powered by Azure OpenAI via LangChai
 | `AZURE_OPENAI_ENDPOINT` | ✅ | Azure OpenAI resource endpoint | `https://your-resource.openai.azure.com/` |
 | `AZURE_OPENAI_DEPLOYMENT` | ✅ | Deployment name of the chat model | `gpt-4o` |
 | `AZURE_OPENAI_API_VERSION` | ✅ | Azure OpenAI API version | `2024-08-01-preview` |
-| `TEMPERATURE` | ❌ | Model temperature (default: 0.7) | `0.7` |
+| `AZURE_OPENAI_EMBEDDINGS_DEPLOYMENT` | ✅ | Deployment name of the text-embedding model (used by RAG retriever) | `text-embedding-ada-002` |
+| `TEMPERATURE` | ❌ | Base model temperature (default: 0.7; individual agents use fixed values: 0.0 for input/evaluator/guardrails, 0.3 for writer/RAG) | `0.7` |
 | `MAX_TOKENS` | ❌ | Max response tokens | `1000` |
 | `LOG_LEVEL` | ❌ | Logging level (default: INFO) | `DEBUG` |
 | `TMDB_API_KEY` | ❌ | TMDB API key for movie data (uses in-memory catalog if not set) | `abc123...` |
 | `MOVIE_FINDER_MODE` | ❌ | Movie finder mode: `auto`, `tmdb`, or `inmemory` (default: auto) | `auto` |
+| `CHROMA_PERSIST_DIRECTORY` | ❌ | Directory for ChromaDB persistence (default: in-memory, ephemeral) | `./chroma_db` |
+| `CHROMA_COLLECTION_NAME` | ❌ | ChromaDB collection name (default: `knowledge_base`) | `knowledge_base` |
+| `GUARDRAIL_ENABLED` | ❌ | Enable guardrail checks before workflow (default: true) | `true` |
+| `GUARDRAIL_MAX_MESSAGE_LENGTH` | ❌ | Maximum allowed message length in characters (default: 2000) | `2000` |
 | `LANGCHAIN_TRACING_V2` | ❌ | Enable LangSmith tracing (default: false) | `true` |
 | `LANGCHAIN_API_KEY` | ❌ | LangSmith API key (required when tracing is enabled) | `lsv2_...` |
 | `LANGCHAIN_PROJECT` | ❌ | LangSmith project name (default: `movie-night-assistant`) | `movie-night-assistant` |
@@ -72,7 +83,7 @@ This single `.env` file works for both local development and Docker Compose.
 
 - Python 3.14+
 - [uv](https://github.com/astral-sh/uv) package manager
-- Azure OpenAI resource with a deployed chat model
+- Azure OpenAI resource with a deployed chat model and an embeddings model
 
 ### Backend (API)
 
@@ -97,7 +108,7 @@ uv run python -m pytest
 Tests do not call Azure OpenAI or TMDB by default:
 
 - **Writer, evaluator, and RAG agents**: `unittest.mock.MagicMock` stands in for the LangChain chat model (`api/test/conftest.py` fixtures `recommendation_writer`, `evaluator`, `rag_agent`).
-- **Input orchestrator and system responder**: mocked at the agent interface where the workflow is under test.
+- **Input orchestrator**: mocked at the agent interface where the workflow is under test.
 - **Movie finder**: `InMemoryMovieFinderAgent` provides a fixed in-memory catalog (same implementation used when `MOVIE_FINDER_MODE=inmemory` or no `TMDB_API_KEY` in production).
 
 ### Frontend (UI)
@@ -201,7 +212,7 @@ With the default startup configuration (`InputOrchestratorAgent`), app questions
 Retry and pass rules live in `api/app/workflow/state.py`:
 
 - `MAX_RETRIES`: maximum evaluation failures before the safe fallback response
-- `PASS_THRESHOLD`: minimum evaluator score (combined with the evaluator’s `passed` flag) to accept a draft
+- `PASS_THRESHOLD`: minimum evaluator score (combined with the evaluator's `passed` flag) to accept a draft
 
 The production app wires `RecommendationWriterAgent`, `EvaluatorAgent`, and `RAGAssistantAgent` in `api/app/main.py` (each takes a mocked LLM in tests). Only the movie finder has a non-LLM implementation (`InMemoryMovieFinderAgent` when TMDB is unavailable).
 
@@ -217,58 +228,77 @@ The production app wires `RecommendationWriterAgent`, `EvaluatorAgent`, and `RAG
 │   │   ├── agents/
 │   │   │   ├── __init__.py
 │   │   │   ├── input_agent.py              # Route classifier (movies/rag/hybrid)
-│   │   │   ├── movie_finder_agent.py       # MovieFinderAgent contract
+│   │   │   ├── movie_finder_agent.py       # MovieFinderAgent protocol
 │   │   │   ├── in_memory_movie_finder_agent.py  # In-memory catalog (no TMDB key)
-│   │   │   ├── tmdb_movie_finder_agent.py  # TMDB finder
+│   │   │   ├── tmdb_movie_finder_agent.py  # TMDB-backed finder
 │   │   │   ├── recommendation_agent.py     # LLM recommendation writer
 │   │   │   ├── evaluator_agent.py          # LLM draft validator
-│   │   │   ├── rag_agent.py                # LLM RAG assistant
-│   │   │   └── system_responder.py         # Fallback responder
-│   │   ├── routers/
-│   │   │   └── routes.py        # /health and /chat endpoints
+│   │   │   └── rag_agent.py                # LLM RAG assistant
+│   │   ├── guardrails/
+│   │   │   ├── __init__.py
+│   │   │   ├── service.py       # GuardrailService: length, injection, off-topic checks
+│   │   │   └── patterns.py      # Compiled injection regex patterns
 │   │   ├── integrations/
 │   │   │   └── tmdb_client.py   # TMDB API client
+│   │   ├── knowledge_base/      # Markdown docs ingested into ChromaDB for RAG
+│   │   │   ├── system_overview.md
+│   │   │   ├── recommendation_rules.md
+│   │   │   ├── evaluation_logic.md
+│   │   │   ├── data_sources.md
+│   │   │   ├── routing_logic.md
+│   │   │   └── known_limitations.md
 │   │   ├── llm/
 │   │   │   ├── client.py        # Azure OpenAI model factory
 │   │   │   └── prompts.py       # System prompts for all agents
-│   │   ├── workflow/
-│   │   │   ├── graph_builder.py # LangGraph MovieNightWorkflow
-│   │   │   ├── nodes.py         # Graph node implementations
-│   │   │   ├── routing.py       # Conditional edges
-│   │   │   ├── state.py         # MovieNightState, MAX_RETRIES, PASS_THRESHOLD
-│   │   │   └── candidate_selector.py # Deterministic selection and constraint checks
+│   │   ├── observability/
+│   │   │   └── langsmith.py     # LangSmith configuration and tracing helpers
 │   │   ├── rag/
-│   │   │   ├── __init__.py
-│   │   │   ├── ingest.py         # Document ingestion and chunking
-│   │   │   ├── retriever.py      # TF-IDF document retrieval
-│   │   │   └── knowledge_base/   # Markdown docs for RAG
-│   │   │       ├── system_overview.md
-│   │   │       ├── recommendation_rules.md
-│   │   │       ├── evaluation_logic.md
-│   │   │       ├── data_sources.md
-│   │   │       ├── routing_logic.md
-│   │   │       └── known_limitations.md
-│   │   └── schemas/
-│   │       ├── __init__.py
-│   │       ├── chat.py           # API request/response models
-│   │       ├── domain.py         # Domain models (MovieResult, DraftRecommendation, etc.)
-│   │       └── orchestrator.py   # Orchestrator/input decision models
+│   │   │   ├── ingest.py        # Document ingestion and chunking
+│   │   │   ├── chroma_store.py  # ChromaDB vector store management
+│   │   │   └── retriever.py     # Semantic document retrieval (top_k=3)
+│   │   ├── routers/
+│   │   │   └── routes.py        # /health and /chat endpoints
+│   │   ├── schemas/
+│   │   │   ├── chat.py          # API request/response models (ChatRequest, ChatResponse)
+│   │   │   ├── domain.py        # Domain models (MovieResult, DraftRecommendation, etc.)
+│   │   │   └── input.py         # Input models (Constraints, MovieSearchQuery, InputDecision)
+│   │   └── workflow/
+│   │       ├── graph_builder.py # LangGraph MovieNightWorkflow
+│   │       ├── nodes.py         # Graph node implementations
+│   │       ├── routing.py       # Conditional edges
+│   │       ├── state.py         # MovieNightState, MAX_RETRIES, PASS_THRESHOLD
+│   │       ├── candidate_selector.py # Deterministic selection and constraint checks
+│   │       └── formatters.py    # Response formatting helpers
 │   ├── test/
 │   │   ├── conftest.py
-│   │   ├── test_domain.py
-│   │   ├── test_evaluator_agent.py
-│   │   ├── test_input_agent.py
-│   │   ├── test_main.py          # API endpoint tests
-│   │   ├── test_movie_finder.py
-│   │   ├── test_rag.py           # RAG retriever, ingester, and agent tests
-│   │   ├── test_recommendation_agent.py
-│   │   ├── test_state.py
-│   │   ├── test_tmdb_client.py
-│   │   ├── test_workflow_integration.py
-│   │   ├── test_workflow_evaluator.py
-│   │   ├── test_workflow_rag.py
-│   │   ├── test_workflow_nodes.py
-│   │   └── test_workflow_routing.py
+│   │   ├── test_main.py              # API endpoint integration tests
+│   │   ├── test_settings.py          # Settings validation tests
+│   │   ├── agents/
+│   │   │   ├── test_input_agent.py
+│   │   │   ├── test_movie_finder.py
+│   │   │   ├── test_recommendation_agent.py
+│   │   │   ├── test_evaluator_agent.py
+│   │   │   └── test_rag_agent.py
+│   │   ├── guardrails/
+│   │   │   ├── test_guardrail_service.py
+│   │   │   └── test_patterns.py
+│   │   ├── integrations/
+│   │   │   ├── test_tmdb_client.py
+│   │   │   └── test_tmdb_client_extended.py
+│   │   ├── observability/
+│   │   │   └── test_observability.py
+│   │   ├── rag/
+│   │   │   └── test_rag.py
+│   │   ├── schemas/
+│   │   │   ├── test_domain.py
+│   │   │   └── test_search_query.py
+│   │   └── workflow/
+│   │       ├── test_state.py
+│   │       ├── test_workflow_nodes.py
+│   │       ├── test_workflow_routing.py
+│   │       ├── test_workflow_evaluator.py
+│   │       ├── test_workflow_rag.py
+│   │       └── test_workflow_integration.py
 │   ├── Dockerfile
 │   └── pyproject.toml
 ├── ui/
@@ -286,3 +316,4 @@ The production app wires `RecommendationWriterAgent`, `EvaluatorAgent`, and `RAG
 - **Stateless**: No memory between messages
 - **No personalized profiles**: No user profiles or watch history tracking
 - **Evaluator cost**: Production evaluation adds an extra LLM call per draft attempt (mitigated by deterministic pre-checks for hard constraint violations)
+- **Guardrail cost**: When `GUARDRAIL_ENABLED=true`, every request performs an LLM classification call in addition to the workflow

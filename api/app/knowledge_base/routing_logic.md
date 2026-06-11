@@ -11,13 +11,15 @@ The InputOrchestratorAgent classifies every user message into one of four routes
 - Requests for movie suggestions
 - Genre-specific queries
 - Mood-based movie requests
-- Constraint-based searches (runtime, etc.)
+- Constraint-based searches (runtime, actors, directors, year, keywords, etc.)
 
 **Examples**:
 - "Recommend a good horror movie"
 - "What should I watch tonight?"
 - "I want something funny and under 2 hours"
 - "Give me a sci-fi movie from the 90s"
+- "Find a Christopher Nolan thriller"
+- "Something with Tom Hanks, lighthearted"
 
 **Flow**: 
 `orchestrate` → `find_movies` → `write_recommendation` → `evaluate` → `respond`
@@ -83,7 +85,7 @@ The InputOrchestratorAgent uses these heuristics:
 
 ## Constraint Extraction
 
-For `movies` and `hybrid` routes, constraints are extracted:
+For `movies` and `hybrid` routes, hard constraints are extracted:
 
 ### Genre Normalization
 | User Says | Normalized Genre |
@@ -101,23 +103,40 @@ For `movies` and `hybrid` routes, constraints are extracted:
 | "short movie", "quick watch" | max_runtime_minutes: 90 |
 | "long movie", "over 2 hours" | min_runtime_minutes: 120 |
 
+## Rich Search Signal Extraction
+
+In addition to hard constraints, the system extracts a `MovieSearchQuery` with richer signals that improve TMDB retrieval quality:
+
+| Signal | Description | Example |
+|--------|-------------|---------|
+| `actors` | Actor names mentioned | "Tom Hanks", "Angelina Jolie" |
+| `directors` | Director names mentioned | "Christopher Nolan", "Quentin Tarantino" |
+| `year` | Specific release year | 2020 |
+| `year_start` / `year_end` | Year range for period searches | 1990–1999 for "90s movies" |
+| `keywords` | Thematic keywords or plot elements | "time travel", "heist", "space" |
+| `mood` | Tone description | "dark", "lighthearted", "intense" |
+| `setting` | Setting or location | "New York", "space", "medieval" |
+| `language` | Original language preference | "Korean", "French" |
+| `text_query` | Free-text when a title or franchise is referenced | "something like Inception" |
+| `exclude_keywords` | Things to avoid | "violence", "sad ending" |
+
 ## RAG Query Generation
 
 For `rag` and `hybrid` routes, a RAG query is generated:
 - Transforms user question into retrieval-friendly format
 - Focuses on the knowledge aspect of the question
-- Used to search internal documentation
+- Used to search internal ChromaDB documentation
 
 ## Post-Routing Behavior
 
 ### Movies/Hybrid Path
-1. MovieFinderAgent retrieves candidates from TMDB
+1. MovieFinderAgent retrieves candidates from TMDB using both constraints and search signals
 2. RecommendationWriterAgent selects best match and writes text
 3. EvaluatorAgent validates quality
 4. Retry loop if evaluation fails (up to 3 times)
 
 ### RAG Path
-1. Retriever searches knowledge base documents
-2. Relevant chunks are added to context
+1. Retriever performs semantic search over ChromaDB knowledge base
+2. Top-3 relevant chunks are added to context
 3. RAGAssistantAgent generates grounded answer
 4. Response formatted and returned
