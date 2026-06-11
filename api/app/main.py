@@ -12,7 +12,6 @@ from app.agents import (
     MovieFinderAgent,
     RAGAssistantAgent,
     RecommendationWriterAgent,
-    SystemResponder,
     TMDBMovieFinderAgent,
 )
 from app.routers.routes import cleanup_workflow, initialize_workflow, router
@@ -86,14 +85,12 @@ async def lifespan(app: FastAPI):
             status = get_tracing_status()
             logger.info(f"LangSmith tracing active: project={status['project']}")
 
-        llm = create_chat_model(settings)
         input_agent_llm = create_chat_model(settings, temperature=0.0)
         writer_llm = create_chat_model(settings, temperature=0.3)
         evaluator_llm = create_chat_model(settings, temperature=0.0)
         rag_llm = create_chat_model(settings, temperature=0.3)
 
         input_agent = InputOrchestratorAgent(input_agent_llm)
-        system_responder = SystemResponder(llm)
         movie_finder = create_movie_finder(settings)
         recommendation_writer = RecommendationWriterAgent(writer_llm)
         evaluator = EvaluatorAgent(evaluator_llm)
@@ -116,13 +113,12 @@ async def lifespan(app: FastAPI):
         )
 
         workflow = MovieNightWorkflow(
-            system_responder=system_responder,
             input_agent=input_agent,
             movie_finder=movie_finder,
-            recommendation_writer=recommendation_writer,
-            evaluator=evaluator,
             rag_retriever=rag_retriever,
             rag_agent=rag_agent,
+            recommendation_writer=recommendation_writer,
+            evaluator=evaluator,
         )
         initialize_workflow(workflow)
         logger.info(

@@ -18,15 +18,12 @@ from app.workflow.nodes import (
     create_input_orchestrate_node,
     create_rag_respond_node,
     create_rag_retrieve_node,
-    create_respond_node,
     create_write_recommendation_node,
 )
 from app.workflow.routing import (
     route_after_evaluate,
     route_after_orchestrate,
-    route_after_orchestrate_with_rag,
     route_after_find_movies_for_hybrid,
-    should_respond,
 )
 from app.schemas.input import Constraints
 
@@ -35,7 +32,6 @@ if TYPE_CHECKING:
     from app.agents import InputOrchestratorAgent
     from app.agents import RAGAssistantAgent
     from app.agents import RecommendationWriterAgent
-    from app.agents import SystemResponder
     from app.agents import MovieFinderAgent
     from app.rag.retriever import DocumentRetriever
 
@@ -48,184 +44,107 @@ class MovieNightWorkflow:
     Encapsulates the graph construction and provides a simple interface
     for executing the workflow with a user message.
 
-    All optional agents degrade gracefully when not provided.
+    All agents are required. The graph is fixed with no optional branches.
     """
 
     def __init__(
         self,
-        system_responder: SystemResponder,
         input_agent: InputOrchestratorAgent,
-        movie_finder: MovieFinderAgent | None = None,
-        recommendation_writer: RecommendationWriterAgent | None = None,
-        evaluator: EvaluatorAgent | None = None,
-        rag_retriever: DocumentRetriever | None = None,
-        rag_agent: RAGAssistantAgent | None = None,
+        movie_finder: MovieFinderAgent,
+        rag_retriever: DocumentRetriever,
+        rag_agent: RAGAssistantAgent,
+        recommendation_writer: RecommendationWriterAgent,
+        evaluator: EvaluatorAgent,
     ) -> None:
         """Initialize the workflow with agent instances.
 
         Args:
-            system_responder: The SystemResponder for fallback non-movie routes.
-            input_agent: The InputOrchestratorAgent for full route classification
+            input_agent: The InputOrchestratorAgent for route classification
                 (movies/rag/hybrid).
             movie_finder: The MovieFinderAgent for candidate retrieval from TMDB or in-memory.
-                If not provided, no movie candidates are retrieved.
-            recommendation_writer: The RecommendationWriterAgent for grounded prose.
-                If provided, generates rich recommendation text instead of lists.
-            evaluator: The EvaluatorAgent for draft validation with retry loop.
-                Requires recommendation_writer. Validates constraints and quality.
             rag_retriever: The DocumentRetriever for knowledge base retrieval.
-                Enables RAG-based responses for system questions.
             rag_agent: The RAGAssistantAgent for grounded answers from docs.
-                Must be provided with rag_retriever for RAG functionality.
+            recommendation_writer: The RecommendationWriterAgent for grounded prose.
+            evaluator: The EvaluatorAgent for draft validation with retry loop.
         """
         if input_agent is None:
             raise ValueError("input_agent must be provided")
         self._input_agent = input_agent
-        self._system_responder = system_responder
         self._movie_finder = movie_finder
-        self._recommendation_writer = recommendation_writer
-        self._evaluator = evaluator
         self._rag_retriever = rag_retriever
         self._rag_agent = rag_agent
+        self._recommendation_writer = recommendation_writer
+        self._evaluator = evaluator
         self._graph = self._build_graph()
 
     def _build_graph(self) -> StateGraph:
         """Build and compile the workflow graph.
 
-        If a movie finder is provided, adds candidate retrieval before
-        response generation. RAG retrieval and response nodes are added
-        for system questions and hybrid routes when rag_retriever and
-        rag_agent are provided.
+        The graph is fixed: RAG retrieval/response for system questions
+        and unknown routes, movie candidate retrieval, recommendation
+        writing, and evaluator retry loop are always present.
 
         Returns:
             Compiled StateGraph ready for execution.
         """
         builder = StateGraph(MovieNightState)
 
-        orchestrate_node = create_input_orchestrate_node(self._input_agent)
-        respond_node = create_respond_node(self._system_responder)
-
-        builder.add_node("orchestrate", orchestrate_node)
-        builder.add_node("respond", respond_node)
-
-        has_rag = self._rag_retriever is not None and self._rag_agent is not None
-
-        if has_rag:
-            self._add_rag_nodes(builder)
-
-        if self._movie_finder is not None:
-            self._build_graph_with_movie_finder(builder, has_rag)
-        else:
-            self._build_graph_without_movie_finder(builder, has_rag)
-
-        return builder.compile()
-
-    def _add_rag_nodes(self, builder: StateGraph) -> None:
-        """Add RAG retrieval and response nodes to the graph."""
-        rag_retrieve_node = create_rag_retrieve_node(self._rag_retriever)
-        rag_respond_node = create_rag_respond_node(self._rag_agent)
-        builder.add_node("rag_retrieve", rag_retrieve_node)
-        builder.add_node("rag_respond", rag_respond_node)
-
-    def _build_graph_with_movie_finder(
-        self, builder: StateGraph, has_rag: bool
-    ) -> None:
-        """Build graph edges when movie finder is available."""
-        find_movies_node = create_find_movies_node(self._movie_finder)
-        builder.add_node("find_movies", find_movies_node)
+        builder.add_node("orchestrate", create_input_orchestrate_node(self._input_agent))
+        builder.add_node("rag_retrieve", create_rag_retrieve_node(self._rag_retriever))
+        builder.add_node("rag_respond", create_rag_respond_node(self._rag_agent))
+        builder.add_node("find_movies", create_find_movies_node(self._movie_finder))
 
         builder.add_edge(START, "orchestrate")
-
-        if has_rag:
-            self._add_rag_enabled_edges(builder)
-        else:
-            builder.add_conditional_edges("orchestrate", route_after_orchestrate)
-
-        if self._recommendation_writer is not None:
-            self._add_recommendation_pipeline(builder, has_rag)
-        else:
-            builder.add_edge("find_movies", "respond")
-
-        builder.add_edge("respond", END)
-
-    def _add_rag_enabled_edges(self, builder: StateGraph) -> None:
-        """Add edges for RAG-enabled workflow."""
         builder.add_conditional_edges(
             "orchestrate",
-            route_after_orchestrate_with_rag,
+            route_after_orchestrate,
             {
                 END: END,
                 "find_movies": "find_movies",
                 "rag_retrieve": "rag_retrieve",
-                "respond": "respond",
             },
         )
         builder.add_edge("rag_retrieve", "rag_respond")
         builder.add_edge("rag_respond", END)
 
-    def _add_recommendation_pipeline(
-        self, builder: StateGraph, has_rag: bool
-    ) -> None:
-        """Add recommendation writer and optional evaluator nodes."""
-        write_node = create_write_recommendation_node(self._recommendation_writer)
-        builder.add_node("write_recommendation", write_node)
+        self._add_recommendation_pipeline(builder)
 
-        if has_rag:
-            builder.add_conditional_edges(
-                "find_movies",
-                route_after_find_movies_for_hybrid,
-                {
-                    "rag_retrieve_hybrid": "rag_retrieve_hybrid",
-                    "write_recommendation": "write_recommendation",
-                },
-            )
-            rag_retrieve_hybrid_node = create_rag_retrieve_node(self._rag_retriever)
-            builder.add_node("rag_retrieve_hybrid", rag_retrieve_hybrid_node)
-            builder.add_edge("rag_retrieve_hybrid", "write_recommendation")
-        else:
-            builder.add_edge("find_movies", "write_recommendation")
+        return builder.compile()
 
-        if self._evaluator is not None:
-            self._add_evaluator_pipeline(builder)
-        else:
-            builder.add_edge("write_recommendation", "respond")
+    def _add_recommendation_pipeline(self, builder: StateGraph) -> None:
+        """Add recommendation writer, hybrid RAG retrieval, and evaluator."""
+        builder.add_node(
+            "write_recommendation",
+            create_write_recommendation_node(self._recommendation_writer),
+        )
+        builder.add_node(
+            "rag_retrieve_hybrid",
+            create_rag_retrieve_node(self._rag_retriever),
+        )
+
+        builder.add_conditional_edges(
+            "find_movies",
+            route_after_find_movies_for_hybrid,
+            {
+                "rag_retrieve_hybrid": "rag_retrieve_hybrid",
+                "write_recommendation": "write_recommendation",
+            },
+        )
+        builder.add_edge("rag_retrieve_hybrid", "write_recommendation")
+        self._add_evaluator_pipeline(builder)
 
     def _add_evaluator_pipeline(self, builder: StateGraph) -> None:
         """Add evaluator node with retry loop."""
-        evaluate_node = create_evaluate_node(self._evaluator)
-        builder.add_node("evaluate", evaluate_node)
+        builder.add_node("evaluate", create_evaluate_node(self._evaluator))
         builder.add_edge("write_recommendation", "evaluate")
         builder.add_conditional_edges(
             "evaluate",
             route_after_evaluate,
             {
-                "respond": "respond",
+                END: END,
                 "write_recommendation": "write_recommendation",
             },
         )
-
-    def _build_graph_without_movie_finder(
-        self, builder: StateGraph, has_rag: bool
-    ) -> None:
-        """Build graph edges when no movie finder is available."""
-        builder.add_edge(START, "orchestrate")
-
-        if has_rag:
-            builder.add_conditional_edges(
-                "orchestrate",
-                route_after_orchestrate_with_rag,
-                {
-                    END: END,
-                    "rag_retrieve": "rag_retrieve",
-                    "respond": "respond",
-                },
-            )
-            builder.add_edge("rag_retrieve", "rag_respond")
-            builder.add_edge("rag_respond", END)
-        else:
-            builder.add_conditional_edges("orchestrate", should_respond)
-
-        builder.add_edge("respond", END)
 
     def invoke(self, user_message: str) -> MovieNightState:
         """Execute the workflow with a user message.

@@ -7,7 +7,6 @@ from app.agents.in_memory_movie_finder_agent import InMemoryMovieFinderAgent
 from app.agents.tmdb_movie_finder_agent import TMDBMovieFinderAgent
 from app.agents.rag_agent import RAGAssistantAgent
 from app.agents.recommendation_agent import RecommendationWriterAgent
-from app.agents.system_responder import SystemResponder
 
 __all__ = [
     "EvaluatorAgent",
@@ -17,5 +16,4 @@ __all__ = [
     "TMDBMovieFinderAgent",
     "RAGAssistantAgent",
     "RecommendationWriterAgent",
-    "SystemResponder",
 ]

@@ -10,7 +10,6 @@ from app.agents import (
     InMemoryMovieFinderAgent,
     RAGAssistantAgent,
     RecommendationWriterAgent,
-    SystemResponder,
 )
 from app.workflow import MovieNightWorkflow
 from app.main import app
@@ -354,6 +353,12 @@ class TestIntegrationWithMockedLLM:
         evaluator = EvaluatorAgent(evaluator_llm)
         return writer, evaluator
 
+    @staticmethod
+    def _make_rag_retriever_and_agent(content: str = "Knowledge base content."):
+        rag_llm = MagicMock(spec=AzureChatOpenAI)
+        rag_llm.invoke.return_value = MagicMock(content=content)
+        return create_retriever(), RAGAssistantAgent(rag_llm)
+
     @pytest.fixture
     def offline_workflow_movies(self):
         """Workflow for movies route testing without live LLM or TMDB."""
@@ -366,13 +371,14 @@ class TestIntegrationWithMockedLLM:
             rag_query=None,
         )
 
-        mock_system_responder = MagicMock(spec=SystemResponder)
         writer, evaluator = self._writer_and_evaluator()
+        rag_retriever, rag_agent = self._make_rag_retriever_and_agent()
 
         return MovieNightWorkflow(
-            system_responder=mock_system_responder,
             input_agent=mock_input_agent,
             movie_finder=InMemoryMovieFinderAgent(),
+            rag_retriever=rag_retriever,
+            rag_agent=rag_agent,
             recommendation_writer=writer,
             evaluator=evaluator,
         )
@@ -389,25 +395,18 @@ class TestIntegrationWithMockedLLM:
             rag_query="How does the system work?",
         )
 
-        mock_system_responder = MagicMock(spec=SystemResponder)
         writer, evaluator = self._writer_and_evaluator()
-
-        rag_llm = MagicMock(spec=AzureChatOpenAI)
-        rag_llm.invoke.return_value = MagicMock(
-            content=(
-                "Based on my knowledge base, here is how the "
-                "Movie Night Assistant works."
-            )
+        rag_retriever, rag_agent = self._make_rag_retriever_and_agent(
+            content="Based on my knowledge base, here is how the Movie Night Assistant works."
         )
 
         return MovieNightWorkflow(
-            system_responder=mock_system_responder,
             input_agent=mock_input_agent,
             movie_finder=InMemoryMovieFinderAgent(),
+            rag_retriever=rag_retriever,
+            rag_agent=rag_agent,
             recommendation_writer=writer,
             evaluator=evaluator,
-            rag_retriever=create_retriever(),
-            rag_agent=RAGAssistantAgent(rag_llm),
         )
 
     @pytest.fixture
@@ -422,22 +421,18 @@ class TestIntegrationWithMockedLLM:
             rag_query="History of horror films",
         )
 
-        mock_system_responder = MagicMock(spec=SystemResponder)
         writer, evaluator = self._writer_and_evaluator()
-
-        rag_llm = MagicMock(spec=AzureChatOpenAI)
-        rag_llm.invoke.return_value = MagicMock(
+        rag_retriever, rag_agent = self._make_rag_retriever_and_agent(
             content="Horror films often build tension through atmosphere."
         )
 
         return MovieNightWorkflow(
-            system_responder=mock_system_responder,
             input_agent=mock_input_agent,
             movie_finder=InMemoryMovieFinderAgent(),
+            rag_retriever=rag_retriever,
+            rag_agent=rag_agent,
             recommendation_writer=writer,
             evaluator=evaluator,
-            rag_retriever=create_retriever(),
-            rag_agent=RAGAssistantAgent(rag_llm),
         )
 
     def test_movies_route_integration(self, offline_workflow_movies):

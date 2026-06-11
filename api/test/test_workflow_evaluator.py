@@ -1,7 +1,7 @@
 """Integration tests for MovieNightWorkflow evaluator functionality."""
 
 from app.workflow.state import MAX_RETRIES
-from app.workflow import RETRY_EXHAUSTED_FALLBACK_MESSAGE, MovieNightWorkflow
+from app.workflow import RETRY_EXHAUSTED_FALLBACK_MESSAGE, NO_MOVIES_FOUND_MESSAGE, MovieNightWorkflow
 from app.schemas.domain import EvaluationResult
 from app.schemas.input import Constraints, InputDecision
 
@@ -12,8 +12,9 @@ class TestMovieNightWorkflowWithEvaluator:
     def test_happy_path_passes_on_first_try(
         self,
         mock_input_agent,
-        mock_system_responder,
         mock_movie_finder,
+        mock_rag_retriever,
+        mock_rag_agent,
         recommendation_writer,
         evaluator,
     ):
@@ -34,11 +35,13 @@ class TestMovieNightWorkflowWithEvaluator:
                 runtime_minutes=136,
             ),
         ]
+        mock_rag_retriever.retrieve.return_value = []
 
         workflow = MovieNightWorkflow(
-            system_responder=mock_system_responder,
             input_agent=mock_input_agent,
             movie_finder=mock_movie_finder,
+            rag_retriever=mock_rag_retriever,
+            rag_agent=mock_rag_agent,
             recommendation_writer=recommendation_writer,
             evaluator=evaluator,
         )
@@ -59,8 +62,9 @@ class TestMovieNightWorkflowWithEvaluator:
     def test_retry_loop_succeeds_after_first_fail(
         self,
         mock_input_agent,
-        mock_system_responder,
         mock_movie_finder,
+        mock_rag_retriever,
+        mock_rag_agent,
         recommendation_writer,
         mock_evaluator,
     ):
@@ -97,11 +101,13 @@ class TestMovieNightWorkflowWithEvaluator:
                 passed=True, score=0.9, feedback="great"
             ),
         ]
+        mock_rag_retriever.retrieve.return_value = []
 
         workflow = MovieNightWorkflow(
-            system_responder=mock_system_responder,
             input_agent=mock_input_agent,
             movie_finder=mock_movie_finder,
+            rag_retriever=mock_rag_retriever,
+            rag_agent=mock_rag_agent,
             recommendation_writer=recommendation_writer,
             evaluator=mock_evaluator,
         )
@@ -122,8 +128,9 @@ class TestMovieNightWorkflowWithEvaluator:
     def test_retry_loop_stops_at_max_retries_and_returns_fallback(
         self,
         mock_input_agent,
-        mock_system_responder,
         mock_movie_finder,
+        mock_rag_retriever,
+        mock_rag_agent,
         recommendation_writer,
         mock_evaluator,
     ):
@@ -148,11 +155,13 @@ class TestMovieNightWorkflowWithEvaluator:
         mock_evaluator.evaluate.return_value = EvaluationResult(
             passed=False, score=0.1, feedback="always bad"
         )
+        mock_rag_retriever.retrieve.return_value = []
 
         workflow = MovieNightWorkflow(
-            system_responder=mock_system_responder,
             input_agent=mock_input_agent,
             movie_finder=mock_movie_finder,
+            rag_retriever=mock_rag_retriever,
+            rag_agent=mock_rag_agent,
             recommendation_writer=recommendation_writer,
             evaluator=mock_evaluator,
         )
@@ -167,8 +176,9 @@ class TestMovieNightWorkflowWithEvaluator:
     def test_retry_loop_stops_when_writer_runs_out_of_candidates(
         self,
         mock_input_agent,
-        mock_system_responder,
         mock_movie_finder,
+        mock_rag_retriever,
+        mock_rag_agent,
         recommendation_writer,
         mock_evaluator,
     ):
@@ -192,11 +202,13 @@ class TestMovieNightWorkflowWithEvaluator:
         mock_evaluator.evaluate.return_value = EvaluationResult(
             passed=False, score=0.1, feedback="bad"
         )
+        mock_rag_retriever.retrieve.return_value = []
 
         workflow = MovieNightWorkflow(
-            system_responder=mock_system_responder,
             input_agent=mock_input_agent,
             movie_finder=mock_movie_finder,
+            rag_retriever=mock_rag_retriever,
+            rag_agent=mock_rag_agent,
             recommendation_writer=recommendation_writer,
             evaluator=mock_evaluator,
         )
@@ -204,14 +216,15 @@ class TestMovieNightWorkflowWithEvaluator:
 
         assert result["rejected_titles"] == ["Only Option"]
         assert result["draft_recommendation"] is None
-        assert result["final_response"] == RETRY_EXHAUSTED_FALLBACK_MESSAGE
+        assert result["final_response"] == NO_MOVIES_FOUND_MESSAGE
         assert mock_evaluator.evaluate.call_count == 1
 
     def test_rag_route_skips_evaluator(
         self,
         mock_input_agent,
-        mock_system_responder,
         mock_movie_finder,
+        mock_rag_retriever,
+        mock_rag_agent,
         recommendation_writer,
         mock_evaluator,
     ):
@@ -222,12 +235,14 @@ class TestMovieNightWorkflowWithEvaluator:
             needs_recommendation=False,
             rag_query="how does it work?",
         )
-        mock_system_responder.respond.return_value = "This app helps you find movies."
+        mock_rag_retriever.retrieve.return_value = []
+        mock_rag_agent.answer.return_value = "This app helps you find movies."
 
         workflow = MovieNightWorkflow(
-            system_responder=mock_system_responder,
             input_agent=mock_input_agent,
             movie_finder=mock_movie_finder,
+            rag_retriever=mock_rag_retriever,
+            rag_agent=mock_rag_agent,
             recommendation_writer=recommendation_writer,
             evaluator=mock_evaluator,
         )
@@ -240,8 +255,9 @@ class TestMovieNightWorkflowWithEvaluator:
     def test_clarification_skips_evaluator(
         self,
         mock_input_agent,
-        mock_system_responder,
         mock_movie_finder,
+        mock_rag_retriever,
+        mock_rag_agent,
         recommendation_writer,
         mock_evaluator,
     ):
@@ -255,9 +271,10 @@ class TestMovieNightWorkflowWithEvaluator:
         )
 
         workflow = MovieNightWorkflow(
-            system_responder=mock_system_responder,
             input_agent=mock_input_agent,
             movie_finder=mock_movie_finder,
+            rag_retriever=mock_rag_retriever,
+            rag_agent=mock_rag_agent,
             recommendation_writer=recommendation_writer,
             evaluator=mock_evaluator,
         )
@@ -270,8 +287,9 @@ class TestMovieNightWorkflowWithEvaluator:
     def test_no_candidates_skips_evaluator(
         self,
         mock_input_agent,
-        mock_system_responder,
         mock_movie_finder,
+        mock_rag_retriever,
+        mock_rag_agent,
         recommendation_writer,
         mock_evaluator,
     ):
@@ -283,11 +301,13 @@ class TestMovieNightWorkflowWithEvaluator:
             rag_query=None,
         )
         mock_movie_finder.find_movies.return_value = []
+        mock_rag_retriever.retrieve.return_value = []
 
         workflow = MovieNightWorkflow(
-            system_responder=mock_system_responder,
             input_agent=mock_input_agent,
             movie_finder=mock_movie_finder,
+            rag_retriever=mock_rag_retriever,
+            rag_agent=mock_rag_agent,
             recommendation_writer=recommendation_writer,
             evaluator=mock_evaluator,
         )
@@ -301,8 +321,9 @@ class TestMovieNightWorkflowWithEvaluator:
     def test_get_response_returns_fallback_when_retries_exhausted(
         self,
         mock_input_agent,
-        mock_system_responder,
         mock_movie_finder,
+        mock_rag_retriever,
+        mock_rag_agent,
         recommendation_writer,
         mock_evaluator,
     ):
@@ -326,11 +347,13 @@ class TestMovieNightWorkflowWithEvaluator:
         mock_evaluator.evaluate.return_value = EvaluationResult(
             passed=False, score=0.1, feedback="bad"
         )
+        mock_rag_retriever.retrieve.return_value = []
 
         workflow = MovieNightWorkflow(
-            system_responder=mock_system_responder,
             input_agent=mock_input_agent,
             movie_finder=mock_movie_finder,
+            rag_retriever=mock_rag_retriever,
+            rag_agent=mock_rag_agent,
             recommendation_writer=recommendation_writer,
             evaluator=mock_evaluator,
         )

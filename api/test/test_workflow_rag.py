@@ -11,7 +11,6 @@ class TestRAGWorkflowIntegration:
     def test_rag_route_uses_rag_pipeline(
         self,
         mock_input_agent,
-        mock_system_responder,
         mock_movie_finder,
         recommendation_writer,
         mock_evaluator,
@@ -36,13 +35,12 @@ class TestRAGWorkflowIntegration:
         mock_rag_agent.answer.return_value = "The Movie Night Assistant uses TMDB for movie data."
 
         workflow = MovieNightWorkflow(
-            system_responder=mock_system_responder,
             input_agent=mock_input_agent,
             movie_finder=mock_movie_finder,
-            recommendation_writer=recommendation_writer,
-            evaluator=mock_evaluator,
             rag_retriever=mock_rag_retriever,
             rag_agent=mock_rag_agent,
+            recommendation_writer=recommendation_writer,
+            evaluator=mock_evaluator,
         )
         result = workflow.invoke("How does this system work?")
 
@@ -57,7 +55,6 @@ class TestRAGWorkflowIntegration:
     def test_hybrid_route_uses_both_movies_and_rag(
         self,
         mock_input_agent,
-        mock_system_responder,
         mock_movie_finder,
         recommendation_writer,
         evaluator,
@@ -90,13 +87,12 @@ class TestRAGWorkflowIntegration:
         ]
 
         workflow = MovieNightWorkflow(
-            system_responder=mock_system_responder,
             input_agent=mock_input_agent,
             movie_finder=mock_movie_finder,
-            recommendation_writer=recommendation_writer,
-            evaluator=evaluator,
             rag_retriever=mock_rag_retriever,
             rag_agent=rag_agent,
+            recommendation_writer=recommendation_writer,
+            evaluator=evaluator,
         )
         result = workflow.invoke("Recommend a comedy and explain why it's funny")
 
@@ -110,7 +106,6 @@ class TestRAGWorkflowIntegration:
     def test_movies_route_with_rag_enabled_skips_rag(
         self,
         mock_input_agent,
-        mock_system_responder,
         mock_movie_finder,
         recommendation_writer,
         evaluator,
@@ -136,13 +131,12 @@ class TestRAGWorkflowIntegration:
         ]
 
         workflow = MovieNightWorkflow(
-            system_responder=mock_system_responder,
             input_agent=mock_input_agent,
             movie_finder=mock_movie_finder,
-            recommendation_writer=recommendation_writer,
-            evaluator=evaluator,
             rag_retriever=mock_rag_retriever,
             rag_agent=mock_rag_agent,
+            recommendation_writer=recommendation_writer,
+            evaluator=evaluator,
         )
         result = workflow.invoke("Recommend an action movie")
 
@@ -151,41 +145,9 @@ class TestRAGWorkflowIntegration:
         mock_rag_retriever.retrieve.assert_not_called()
         mock_rag_agent.answer.assert_not_called()
 
-    def test_rag_route_without_rag_components_falls_back_to_system_responder(
-        self,
-        mock_input_agent,
-        mock_system_responder,
-        mock_movie_finder,
-        recommendation_writer,
-        mock_evaluator,
-    ):
-        mock_input_agent.decide.return_value = InputDecision(
-            route="rag",
-            constraints=Constraints(),
-            needs_clarification=False,
-            needs_recommendation=False,
-            rag_query="how does it work?",
-        )
-        mock_system_responder.respond.return_value = "Fallback system response."
-
-        workflow = MovieNightWorkflow(
-            system_responder=mock_system_responder,
-            input_agent=mock_input_agent,
-            movie_finder=mock_movie_finder,
-            recommendation_writer=recommendation_writer,
-            evaluator=mock_evaluator,
-            rag_retriever=None,
-            rag_agent=None,
-        )
-        result = workflow.invoke("how does this work?")
-
-        assert result["final_response"] == "Fallback system response."
-        mock_system_responder.respond.assert_called_once()
-
     def test_rag_route_populates_retrieved_contexts_in_state(
         self,
         mock_input_agent,
-        mock_system_responder,
         mock_movie_finder,
         recommendation_writer,
         mock_evaluator,
@@ -217,15 +179,15 @@ class TestRAGWorkflowIntegration:
         mock_rag_agent.answer.return_value = "Here are the limitations..."
 
         workflow = MovieNightWorkflow(
-            system_responder=mock_system_responder,
             input_agent=mock_input_agent,
             movie_finder=mock_movie_finder,
-            recommendation_writer=recommendation_writer,
-            evaluator=mock_evaluator,
             rag_retriever=mock_rag_retriever,
             rag_agent=mock_rag_agent,
+            recommendation_writer=recommendation_writer,
+            evaluator=mock_evaluator,
         )
         result = workflow.invoke("What are the limitations?")
 
         assert result["retrieved_contexts"] == expected_contexts
         assert len(result["retrieved_contexts"]) == 2
+

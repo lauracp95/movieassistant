@@ -14,9 +14,11 @@ Example usage::
     from app.workflow import MovieNightWorkflow
 
     workflow = MovieNightWorkflow(
-        system_responder=system_responder,
         input_agent=input_agent,
         movie_finder=movie_finder,
+        rag_retriever=rag_retriever,
+        rag_agent=rag_agent,
+        recommendation_writer=recommendation_writer,
     )
 
     result = workflow.invoke("Recommend a comedy movie")
@@ -34,15 +36,12 @@ from app.workflow.nodes import (
     create_input_orchestrate_node,
     create_rag_respond_node,
     create_rag_retrieve_node,
-    create_respond_node,
     create_write_recommendation_node,
 )
 from app.workflow.routing import (
     route_after_evaluate,
     route_after_orchestrate,
-    route_after_orchestrate_with_rag,
     route_after_find_movies_for_hybrid,
-    should_respond,
 )
 from app.workflow.state import (
     MAX_RETRIES,
@@ -62,7 +61,6 @@ __all__ = [
     "PASS_THRESHOLD",
     "create_initial_state",
     "create_input_orchestrate_node",
-    "create_respond_node",
     "create_find_movies_node",
     "create_write_recommendation_node",
     "create_evaluate_node",
@@ -70,9 +68,7 @@ __all__ = [
     "create_rag_respond_node",
     "route_after_evaluate",
     "route_after_orchestrate",
-    "route_after_orchestrate_with_rag",
     "route_after_find_movies_for_hybrid",
-    "should_respond",
     "format_candidate_list_response",
     "NO_MOVIES_FOUND_MESSAGE",
     "RETRY_EXHAUSTED_FALLBACK_MESSAGE",

@@ -6,28 +6,10 @@ from app.workflow.state import MAX_RETRIES
 from app.workflow import (
     route_after_evaluate,
     route_after_orchestrate,
-    should_respond,
 )
 from app.schemas.domain import DraftRecommendation, EvaluationResult
 
 from conftest import make_movie
-
-
-class TestShouldRespond:
-    def test_should_respond_movies(self):
-        assert should_respond({"route": "movies"}) == "respond"
-
-    def test_should_respond_unknown_route(self):
-        assert should_respond({"route": "unknown"}) == "respond"
-
-    def test_should_respond_rag(self):
-        assert should_respond({"route": "rag"}) == "respond"
-
-    def test_should_respond_hybrid(self):
-        assert should_respond({"route": "hybrid"}) == "respond"
-
-    def test_should_not_respond_clarification(self):
-        assert should_respond({"route": "clarification"}) == END
 
 
 class TestRouteAfterOrchestrate:
@@ -37,15 +19,18 @@ class TestRouteAfterOrchestrate:
     def test_routes_to_find_movies_for_hybrid_route(self):
         assert route_after_orchestrate({"route": "hybrid"}) == "find_movies"
 
-    def test_routes_to_respond_for_rag_route(self):
-        assert route_after_orchestrate({"route": "rag"}) == "respond"
+    def test_routes_to_rag_retrieve_for_rag_route(self):
+        assert route_after_orchestrate({"route": "rag"}) == "rag_retrieve"
+
+    def test_routes_to_rag_retrieve_for_unknown_route(self):
+        assert route_after_orchestrate({"route": "unknown"}) == "rag_retrieve"
 
     def test_routes_to_end_for_clarification(self):
         assert route_after_orchestrate({"route": "clarification"}) == END
 
 
 class TestRouteAfterEvaluate:
-    def test_routes_to_respond_when_draft_survives(self):
+    def test_routes_to_end_when_draft_survives(self):
         draft = DraftRecommendation(
             movie=make_movie("1", "Passed", genres=["A"]),
             recommendation_text="ok",
@@ -57,15 +42,15 @@ class TestRouteAfterEvaluate:
             ),
             "retry_count": 0,
         }
-        assert route_after_evaluate(state) == "respond"
+        assert route_after_evaluate(state) == END
 
-    def test_routes_to_respond_when_no_evaluation_happened(self):
+    def test_routes_to_end_when_no_evaluation_happened(self):
         state = {
             "draft_recommendation": None,
             "evaluation_result": None,
             "retry_count": 0,
         }
-        assert route_after_evaluate(state) == "respond"
+        assert route_after_evaluate(state) == END
 
     def test_routes_to_writer_when_retry_available(self):
         state = {
@@ -77,7 +62,7 @@ class TestRouteAfterEvaluate:
         }
         assert route_after_evaluate(state) == "write_recommendation"
 
-    def test_routes_to_respond_when_retries_exhausted(self):
+    def test_routes_to_end_when_retries_exhausted(self):
         state = {
             "draft_recommendation": None,
             "evaluation_result": EvaluationResult(
@@ -85,4 +70,4 @@ class TestRouteAfterEvaluate:
             ),
             "retry_count": MAX_RETRIES,
         }
-        assert route_after_evaluate(state) == "respond"
+        assert route_after_evaluate(state) == END

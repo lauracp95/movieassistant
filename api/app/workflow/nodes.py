@@ -25,7 +25,6 @@ if TYPE_CHECKING:
     from app.agents import InputOrchestratorAgent
     from app.agents import RAGAssistantAgent
     from app.agents import RecommendationWriterAgent
-    from app.agents import SystemResponder
     from app.agents import MovieFinderAgent
     from app.rag.retriever import DocumentRetriever
 
@@ -93,94 +92,6 @@ def create_input_orchestrate_node(
     return input_orchestrate
 
 
-def create_respond_node(
-    system_responder: SystemResponder,
-) -> Callable[[MovieNightState], dict]:
-    """Create the respond node that generates the final response.
-
-    For movie routes, uses the draft recommendation text when available
-    (from RecommendationWriterAgent), or falls back to a formatted candidate
-    list or static messages.
-
-    For RAG and unknown routes, falls back to SystemResponder.
-
-    Args:
-        system_responder: The SystemResponder instance (fallback for non-movie routes).
-
-    Returns:
-        A node function that generates the response based on route.
-    """
-    from app.workflow.candidate_selector import filter_candidates
-
-    def respond(state: MovieNightState) -> dict:
-        route = state.get("route")
-        user_message = state["user_message"]
-        constraints = state.get("constraints") or Constraints()
-        candidate_movies = state.get("candidate_movies", [])
-        rejected_titles = state.get("rejected_titles", [])
-        draft: DraftRecommendation | None = state.get("draft_recommendation")
-        evaluation_result: EvaluationResult | None = state.get("evaluation_result")
-        retry_count = state.get("retry_count", 0)
-
-        if route == "clarification":
-            logger.info("Respond node: clarification already set, skipping")
-            return {}
-
-        logger.info(
-            f"Respond node processing: route={route}, "
-            f"candidates={len(candidate_movies)}, "
-            f"rejected={len(rejected_titles)}, "
-            f"has_draft={draft is not None}, "
-            f"retry_count={retry_count}, "
-            f"has_evaluation={evaluation_result is not None}"
-        )
-
-        if route in ("movies", "hybrid"):
-            reply = _generate_movie_response(
-                draft=draft,
-                evaluation_result=evaluation_result,
-                retry_count=retry_count,
-                candidate_movies=candidate_movies,
-                constraints=constraints,
-                rejected_titles=rejected_titles,
-            )
-        elif route == "rag":
-            reply = system_responder.respond(user_message)
-        else:
-            reply = system_responder.respond(user_message)
-
-        return {"final_response": reply}
-
-    def _generate_movie_response(
-        draft: DraftRecommendation | None,
-        evaluation_result: EvaluationResult | None,
-        retry_count: int,
-        candidate_movies: list,
-        constraints: Constraints,
-        rejected_titles: list[str],
-    ) -> str:
-        """Generate response for movie/hybrid routes."""
-        if draft is not None:
-            return draft.recommendation_text
-
-        if evaluation_result is not None and retry_count >= MAX_RETRIES:
-            logger.info(
-                "Respond node: retries exhausted after evaluation failures; "
-                "returning safe fallback"
-            )
-            return RETRY_EXHAUSTED_FALLBACK_MESSAGE
-
-        safe_candidates = filter_candidates(
-            candidate_movies, constraints, rejected_titles
-        )
-        if safe_candidates:
-            return format_candidate_list_response(safe_candidates, constraints)
-
-        return NO_MOVIES_FOUND_MESSAGE
-
-    return respond
-
-
 def create_find_movies_node(
     movie_finder: MovieFinderAgent,
 ) -> Callable[[MovieNightState], dict]:
@@ -231,15 +142,17 @@ def create_write_recommendation_node(
     It consumes ``candidate_movies``, ``constraints``, ``user_message`` and
     ``rejected_titles`` from state and produces a ``DraftRecommendation``.
 
-    The draft is stored in state under ``draft_recommendation`` and is
-    consumed by the respond node.
+    The draft and its text are stored in state under ``draft_recommendation``
+    and ``final_response`` respectively.
 
     Args:
         writer: The RecommendationWriterAgent instance.
 
     Returns:
-        A node function that populates ``draft_recommendation`` in state.
+        A node function that populates ``draft_recommendation`` and
+        ``final_response`` in state.
     """
+    from app.workflow.candidate_selector import filter_candidates
 
     def write_recommendation(state: MovieNightState) -> dict:
         user_message = state.get("user_message", "")
@@ -255,7 +168,7 @@ def create_write_recommendation_node(
 
         if not candidate_movies:
             logger.info("Write recommendation node: no candidates, skipping")
-            return {"draft_recommendation": None}
+            return {"draft_recommendation": None, "final_response": NO_MOVIES_FOUND_MESSAGE}
 
         draft = writer.write(
             user_message=user_message,
@@ -266,12 +179,18 @@ def create_write_recommendation_node(
 
         if draft is None:
             logger.info("Write recommendation node: writer returned None")
-            return {"draft_recommendation": None}
+            safe_candidates = filter_candidates(candidate_movies, constraints, rejected_titles)
+            final_response = (
+                format_candidate_list_response(safe_candidates, constraints)
+                if safe_candidates
+                else NO_MOVIES_FOUND_MESSAGE
+            )
+            return {"draft_recommendation": None, "final_response": final_response}
 
         logger.info(
             f"Write recommendation node: drafted movie='{draft.movie.title}'"
         )
-        return {"draft_recommendation": draft}
+        return {"draft_recommendation": draft, "final_response": draft.recommendation_text}
 
     return write_recommendation
 
@@ -291,17 +210,21 @@ def create_evaluate_node(
     - the failed ``draft_recommendation.movie.title`` is appended to
       ``rejected_titles``
     - ``draft_recommendation`` is cleared
+    - when retries are exhausted, ``final_response`` is set to the safe
+      fallback message so the workflow can proceed to END
 
     If there is no draft to evaluate (e.g. the writer returned ``None``
     because no candidates survived filtering), the node returns no updates
-    so ``respond`` can handle the empty case.
+    so ``route_after_evaluate`` can proceed to END with ``final_response``
+    already set by the write_recommendation node.
 
     Args:
         evaluator: The :class:`EvaluatorAgent` instance.
 
     Returns:
         A node function that updates ``evaluation_result``, and optionally
-        ``retry_count``, ``rejected_titles`` and ``draft_recommendation``.
+        ``retry_count``, ``rejected_titles``, ``draft_recommendation``,
+        and ``final_response``.
     """
 
     def evaluate(state: MovieNightState) -> dict:
@@ -314,7 +237,7 @@ def create_evaluate_node(
         if draft is None:
             logger.info(
                 "Evaluate node: no draft to evaluate; marking retries as "
-                "exhausted so the workflow proceeds to respond"
+                "exhausted so the workflow proceeds to END"
             )
             return {"retry_count": MAX_RETRIES}
 
@@ -353,6 +276,14 @@ def create_evaluate_node(
         updates["retry_count"] = retry_count + 1
         updates["rejected_titles"] = rejected_titles
         updates["draft_recommendation"] = None
+
+        if updates["retry_count"] >= MAX_RETRIES:
+            logger.info(
+                f"Evaluate node: retries exhausted at {updates['retry_count']}; "
+                "setting safe fallback response"
+            )
+            updates["final_response"] = RETRY_EXHAUSTED_FALLBACK_MESSAGE
+
         return updates
 
     return evaluate
@@ -397,7 +328,8 @@ def create_rag_respond_node(
     """Create the rag_respond node that generates RAG-grounded answers.
 
     This node uses the RAGAssistantAgent to generate an answer based on
-    retrieved contexts. It is used for pure RAG routes (system questions).
+    retrieved contexts. It is used for pure RAG routes (system questions)
+    and as the fallback for unknown routes.
 
     Args:
         rag_agent: The RAGAssistantAgent instance.

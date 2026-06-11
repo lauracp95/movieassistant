@@ -15,7 +15,6 @@ from app.agents import (
     MovieFinderAgent,
     RAGAssistantAgent,
     RecommendationWriterAgent,
-    SystemResponder,
 )
 from app.rag.retriever import DocumentRetriever
 from app.schemas.domain import EvaluationResult, MovieResult
@@ -24,11 +23,6 @@ from app.schemas.domain import EvaluationResult, MovieResult
 @pytest.fixture
 def mock_input_agent():
     return MagicMock(spec=InputOrchestratorAgent)
-
-
-@pytest.fixture
-def mock_system_responder():
-    return MagicMock(spec=SystemResponder)
 
 
 @pytest.fixture
@@ -57,7 +51,15 @@ def recommendation_writer():
 
 @pytest.fixture
 def mock_evaluator():
-    return MagicMock(spec=EvaluatorAgent)
+    mock = MagicMock(spec=EvaluatorAgent)
+    mock.evaluate.return_value = EvaluationResult(
+        passed=True,
+        score=1.0,
+        feedback="Looks good.",
+        constraint_violations=[],
+        improvement_suggestions=[],
+    )
+    return mock
 
 
 @pytest.fixture

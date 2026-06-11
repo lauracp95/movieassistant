@@ -3,12 +3,12 @@
 from app.workflow.state import MAX_RETRIES
 from app.workflow import (
     RETRY_EXHAUSTED_FALLBACK_MESSAGE,
+    NO_MOVIES_FOUND_MESSAGE,
     create_evaluate_node,
     create_find_movies_node,
     create_input_orchestrate_node,
     create_rag_respond_node,
     create_rag_retrieve_node,
-    create_respond_node,
     create_write_recommendation_node,
 )
 from app.schemas.domain import (
@@ -109,117 +109,6 @@ class TestInputOrchestrateNode:
         assert "clarify" in result["final_response"].lower()
 
 
-class TestRespondNode:
-    def test_respond_movies_route_with_candidates(
-        self, mock_system_responder
-    ):
-        candidates = [
-            MovieResult(
-                id="test-1",
-                title="Action Movie",
-                year=2023,
-                genres=["Action"],
-                overview="A great action movie.",
-                rating=8.0,
-                source="test",
-            ),
-        ]
-
-        node = create_respond_node(mock_system_responder)
-        result = node({
-            "user_message": "Recommend action movies",
-            "route": "movies",
-            "constraints": Constraints(genres=["action"]),
-            "candidate_movies": candidates,
-        })
-
-        assert "final_response" in result
-        assert "Action Movie" in result["final_response"]
-
-    def test_respond_movies_route_no_candidates(
-        self, mock_system_responder
-    ):
-        node = create_respond_node(mock_system_responder)
-        result = node({
-            "user_message": "Recommend a rare genre movie",
-            "route": "movies",
-            "constraints": Constraints(),
-            "candidate_movies": [],
-        })
-
-        assert "final_response" in result
-        assert "couldn't find" in result["final_response"].lower()
-
-    def test_respond_rag_route(self, mock_system_responder):
-        mock_system_responder.respond.return_value = "This app helps you find movies."
-
-        node = create_respond_node(mock_system_responder)
-        result = node({
-            "user_message": "What does this app do?",
-            "route": "rag",
-            "constraints": None,
-            "candidate_movies": [],
-        })
-
-        assert result["final_response"] == "This app helps you find movies."
-        mock_system_responder.respond.assert_called_once()
-
-    def test_respond_hybrid_route_with_candidates(
-        self, mock_system_responder
-    ):
-        candidates = [
-            MovieResult(
-                id="test-1",
-                title="Horror Classic",
-                year=1990,
-                genres=["Horror"],
-                overview="A classic horror film.",
-                rating=7.5,
-                source="test",
-            ),
-        ]
-
-        node = create_respond_node(mock_system_responder)
-        result = node({
-            "user_message": "Horror movies and their history",
-            "route": "hybrid",
-            "constraints": Constraints(genres=["horror"]),
-            "candidate_movies": candidates,
-        })
-
-        assert "Horror Classic" in result["final_response"]
-
-    def test_respond_skips_clarification_route(
-        self, mock_system_responder
-    ):
-        node = create_respond_node(mock_system_responder)
-        result = node({
-            "user_message": "help",
-            "route": "clarification",
-            "constraints": None,
-            "candidate_movies": [],
-        })
-
-        assert result == {}
-        mock_system_responder.respond.assert_not_called()
-
-    def test_respond_unknown_route_fallback(
-        self, mock_system_responder
-    ):
-        mock_system_responder.respond.return_value = "Fallback response"
-
-        node = create_respond_node(mock_system_responder)
-        result = node({
-            "user_message": "Unknown route test",
-            "route": "unknown",
-            "constraints": None,
-            "candidate_movies": [],
-        })
-
-        assert result["final_response"] == "Fallback response"
-        mock_system_responder.respond.assert_called_once()
-
-
 class TestFindMoviesNode:
     def test_find_movies_node_populates_candidates(self, mock_movie_finder):
         mock_movie_finder.find_movies.return_value = [
@@ -290,7 +179,8 @@ class TestWriteRecommendationNode:
             "rejected_titles": [],
         })
 
-        assert result == {"draft_recommendation": None}
+        assert result["draft_recommendation"] is None
+        assert result["final_response"] == NO_MOVIES_FOUND_MESSAGE
         mock_recommendation_writer.write.assert_not_called()
 
     def test_populates_draft_recommendation(self, mock_recommendation_writer):
@@ -311,6 +201,7 @@ class TestWriteRecommendationNode:
         })
 
         assert result["draft_recommendation"] is draft
+        assert result["final_response"] == "Watch The Matrix, it's a classic."
         mock_recommendation_writer.write.assert_called_once()
         kwargs = mock_recommendation_writer.write.call_args.kwargs
         assert kwargs["user_message"] == "Sci-fi please"
@@ -343,7 +234,26 @@ class TestWriteRecommendationNode:
             "rejected_titles": ["Only"],
         })
 
-        assert result == {"draft_recommendation": None}
+        assert result["draft_recommendation"] is None
+        assert "final_response" in result
+
+    def test_sets_final_response_from_draft_text(self, mock_recommendation_writer):
+        movie = make_movie("1", "Inception", genres=["Sci-Fi"])
+        draft = DraftRecommendation(
+            movie=movie,
+            recommendation_text="Inception will blow your mind.",
+        )
+        mock_recommendation_writer.write.return_value = draft
+
+        node = create_write_recommendation_node(mock_recommendation_writer)
+        result = node({
+            "user_message": "Sci-fi",
+            "constraints": Constraints(),
+            "candidate_movies": [movie],
+            "rejected_titles": [],
+        })
+
+        assert result["final_response"] == "Inception will blow your mind."
 
 
 class TestEvaluateNode:
@@ -477,6 +387,28 @@ class TestEvaluateNode:
         assert kwargs["draft"] is draft
         assert kwargs["rejected_titles"] == ["Bad One"]
 
+    def test_sets_fallback_response_when_retries_exhausted(self, mock_evaluator):
+        movie = make_movie("1", "Last Chance", genres=["Action"])
+        draft = DraftRecommendation(
+            movie=movie, recommendation_text="Some text."
+        )
+        mock_evaluator.evaluate.return_value = EvaluationResult(
+            passed=False, score=0.1, feedback="still bad"
+        )
+
+        node = create_evaluate_node(mock_evaluator)
+        result = node({
+            "user_message": "recommend",
+            "constraints": Constraints(),
+            "draft_recommendation": draft,
+            "rejected_titles": [],
+            "retry_count": MAX_RETRIES - 1,
+        })
+
+        assert result["retry_count"] == MAX_RETRIES
+        assert result["final_response"] == RETRY_EXHAUSTED_FALLBACK_MESSAGE
+        assert result["draft_recommendation"] is None
+
 
 class TestRAGRetrieveNode:
     def test_rag_retrieve_uses_rag_query(self, mock_rag_retriever):
@@ -551,178 +483,3 @@ class TestRAGRespondNode:
             query="What is this?",
             contexts=[],
         )
-
-
-class TestRespondNodeWithDraft:
-    def test_respond_uses_draft_text_when_available(
-        self, mock_system_responder
-    ):
-        candidates = [make_movie("1", "Fallback Title", genres=["Action"])]
-        draft = DraftRecommendation(
-            movie=make_movie(
-                "2",
-                "Selected Movie",
-                genres=["Action"],
-                rating=8.0,
-                overview="A selected story.",
-            ),
-            recommendation_text="Selected Movie is a grounded pick for action fans.",
-            reasoning="matches genres: action",
-        )
-
-        node = create_respond_node(mock_system_responder)
-        result = node({
-            "user_message": "Action movie",
-            "route": "movies",
-            "constraints": Constraints(genres=["action"]),
-            "candidate_movies": candidates,
-            "draft_recommendation": draft,
-        })
-
-        assert result["final_response"] == (
-            "Selected Movie is a grounded pick for action fans."
-        )
-        assert "Fallback Title" not in result["final_response"]
-
-    def test_respond_falls_back_to_candidates_without_draft(
-        self, mock_system_responder
-    ):
-        candidates = [make_movie("1", "Fallback Title", genres=["Action"])]
-
-        node = create_respond_node(mock_system_responder)
-        result = node({
-            "user_message": "Action movie",
-            "route": "movies",
-            "constraints": Constraints(genres=["action"]),
-            "candidate_movies": candidates,
-            "draft_recommendation": None,
-        })
-
-        assert "Fallback Title" in result["final_response"]
-
-    def test_respond_fallback_excludes_rejected_titles(
-        self, mock_system_responder
-    ):
-        candidates = [
-            make_movie("1", "Rejected Pick", genres=["Action"]),
-            make_movie("2", "Safe Pick", genres=["Action"]),
-        ]
-
-        node = create_respond_node(mock_system_responder)
-        result = node({
-            "user_message": "Action movie",
-            "route": "movies",
-            "constraints": Constraints(genres=["action"]),
-            "candidate_movies": candidates,
-            "rejected_titles": ["Rejected Pick"],
-            "draft_recommendation": None,
-        })
-
-        assert "Rejected Pick" not in result["final_response"]
-        assert "Safe Pick" in result["final_response"]
-
-    def test_respond_fallback_excludes_runtime_violations(
-        self, mock_system_responder
-    ):
-        candidates = [
-            make_movie("1", "Too Long", genres=["Action"], runtime_minutes=200),
-            make_movie("2", "Just Right", genres=["Action"], runtime_minutes=90),
-        ]
-
-        node = create_respond_node(mock_system_responder)
-        result = node({
-            "user_message": "Short action movie",
-            "route": "movies",
-            "constraints": Constraints(
-                genres=["action"], max_runtime_minutes=120
-            ),
-            "candidate_movies": candidates,
-            "rejected_titles": [],
-            "draft_recommendation": None,
-        })
-
-        assert "Too Long" not in result["final_response"]
-        assert "Just Right" in result["final_response"]
-
-    def test_respond_fallback_shows_no_match_when_all_rejected(
-        self, mock_system_responder
-    ):
-        candidates = [make_movie("1", "Only", genres=["Action"])]
-
-        node = create_respond_node(mock_system_responder)
-        result = node({
-            "user_message": "Action movie",
-            "route": "movies",
-            "constraints": Constraints(genres=["action"]),
-            "candidate_movies": candidates,
-            "rejected_titles": ["Only"],
-            "draft_recommendation": None,
-        })
-
-        assert "Only" not in result["final_response"]
-        assert "couldn't find" in result["final_response"].lower()
-
-
-class TestRespondNodeWithEvaluation:
-    def test_respond_uses_safe_fallback_when_retries_exhausted(
-        self, mock_system_responder
-    ):
-        node = create_respond_node(mock_system_responder)
-        result = node({
-            "user_message": "Recommend something",
-            "route": "movies",
-            "constraints": Constraints(),
-            "candidate_movies": [
-                make_movie("1", "Rejected A"),
-                make_movie("2", "Rejected B"),
-            ],
-            "rejected_titles": ["Rejected A", "Rejected B"],
-            "draft_recommendation": None,
-            "evaluation_result": EvaluationResult(
-                passed=False, score=0.1, feedback="still bad"
-            ),
-            "retry_count": MAX_RETRIES,
-        })
-
-        assert result["final_response"] == RETRY_EXHAUSTED_FALLBACK_MESSAGE
-
-    def test_respond_prefers_draft_over_fallback(
-        self, mock_system_responder
-    ):
-        draft = DraftRecommendation(
-            movie=make_movie("1", "Accepted", genres=["Action"]),
-            recommendation_text="A solid pick for action fans.",
-        )
-        node = create_respond_node(mock_system_responder)
-        result = node({
-            "user_message": "Recommend something",
-            "route": "movies",
-            "constraints": Constraints(),
-            "candidate_movies": [draft.movie],
-            "rejected_titles": [],
-            "draft_recommendation": draft,
-            "evaluation_result": EvaluationResult(
-                passed=True, score=0.9, feedback="ok"
-            ),
-            "retry_count": 0,
-        })
-
-        assert result["final_response"] == "A solid pick for action fans."
-
-    def test_respond_no_candidates_still_uses_no_match_message(
-        self, mock_system_responder
-    ):
-        node = create_respond_node(mock_system_responder)
-        result = node({
-            "user_message": "Recommend something",
-            "route": "movies",
-            "constraints": Constraints(),
-            "candidate_movies": [],
-            "rejected_titles": [],
-            "draft_recommendation": None,
-            "evaluation_result": None,
-            "retry_count": 0,
-        })
-
-        assert "couldn't find" in result["final_response"].lower()
-        assert result["final_response"] != RETRY_EXHAUSTED_FALLBACK_MESSAGE
