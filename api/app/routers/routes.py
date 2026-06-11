@@ -3,6 +3,7 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException
 
+from app.guardrails import GuardrailService
 from app.workflow import MovieNightWorkflow
 from app.observability import traced_chat
 from app.schemas import ChatRequest, ChatResponse, HealthResponse
@@ -31,6 +32,19 @@ def cleanup_workflow() -> None:
     """Clean up workflow instance during shutdown."""
     global workflow
     workflow = None
+
+
+guardrail_service: GuardrailService | None = None
+
+
+def initialize_guardrails(service: GuardrailService) -> None:
+    global guardrail_service
+    guardrail_service = service
+
+
+def cleanup_guardrails() -> None:
+    global guardrail_service
+    guardrail_service = None
 
 
 @router.get("/health", response_model=HealthResponse)
@@ -137,6 +151,12 @@ def chat(request: ChatRequest) -> ChatResponse:
             status_code=500,
             detail="Workflow not initialized",
         )
+
+    if guardrail_service is not None:
+        guard = guardrail_service.check(request.message)
+        if guard.blocked:
+            logger.info("Guardrail blocked request: reason=%s", guard.reason)
+            return ChatResponse(reply=guard.reply, route=None)
 
     session_id = getattr(request, "session_id", None)
 

@@ -19,6 +19,8 @@ import os
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any, Generator
 
+from fastapi import HTTPException
+
 if TYPE_CHECKING:
     from app.settings import Settings
 
@@ -165,6 +167,8 @@ def traced_chat(
     except ImportError:
         logger.warning("langsmith package not available; tracing disabled for this request")
         yield trace_meta
+    except HTTPException:
+        raise
     except Exception as e:
         logger.warning(f"Tracing error (non-fatal): {e}")
         yield trace_meta

@@ -85,6 +85,17 @@ class Settings(BaseSettings):
         description="Name of the ChromaDB collection used by the RAG retriever"
     )
 
+    # Guardrails
+    guardrail_max_message_length: int = Field(
+        default=2000,
+        gt=0,
+        description="Maximum allowed message length in characters before the guardrail blocks the request",
+    )
+    guardrail_enabled: bool = Field(
+        default=True,
+        description="Enable guardrail checks (length, injection, topic) before workflow invocation",
+    )
+
     # LangSmith observability (optional)
     langchain_tracing_v2: bool = Field(
         default=False,

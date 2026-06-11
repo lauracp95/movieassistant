@@ -14,7 +14,8 @@ from app.agents import (
     RecommendationWriterAgent,
     TMDBMovieFinderAgent,
 )
-from app.routers.routes import cleanup_workflow, initialize_workflow, router
+from app.guardrails import GuardrailService
+from app.routers.routes import cleanup_guardrails, cleanup_workflow, initialize_guardrails, initialize_workflow, router
 from app.integrations.tmdb_client import TMDBClient
 from langchain_openai import AzureOpenAIEmbeddings
 
@@ -121,6 +122,10 @@ async def lifespan(app: FastAPI):
             evaluator=evaluator,
         )
         initialize_workflow(workflow)
+        guardrail_llm = create_chat_model(settings, temperature=0.0)
+        guardrail_service = GuardrailService(guardrail_llm, settings)
+        initialize_guardrails(guardrail_service)
+        logger.info("Guardrail service initialized (enabled=%s)", settings.guardrail_enabled)
         logger.info(
             f"Movie Assistant workflow initialized successfully "
             f"(finder: {type(movie_finder).__name__}, RAG: enabled)"
@@ -133,6 +138,7 @@ async def lifespan(app: FastAPI):
     yield
 
     cleanup_workflow()
+    cleanup_guardrails()
     cleanup_tmdb_client()
     logger.info("Movie Assistant workflow cleaned up")
 
