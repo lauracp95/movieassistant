@@ -81,6 +81,21 @@ def create_input_orchestrate_node(
                 "final_response": clarification,
             }
 
+        _KNOWN_ROUTES = {"movies", "rag", "hybrid"}
+        if decision.route not in _KNOWN_ROUTES:
+            logger.warning(
+                "Unrecognised route '%s' from orchestrator; defaulting to clarification",
+                decision.route,
+            )
+            return {
+                "route": "clarification",
+                "constraints": decision.constraints,
+                "search_query": None,
+                "needs_recommendation": False,
+                "rag_query": None,
+                "final_response": "Could you please clarify what you're looking for?",
+            }
+
         return {
             "route": decision.route,
             "constraints": decision.constraints,
@@ -328,8 +343,7 @@ def create_rag_respond_node(
     """Create the rag_respond node that generates RAG-grounded answers.
 
     This node uses the RAGAssistantAgent to generate an answer based on
-    retrieved contexts. It is used for pure RAG routes (system questions)
-    and as the fallback for unknown routes.
+    retrieved contexts. It is used for pure RAG routes (system questions).
 
     Args:
         rag_agent: The RAGAssistantAgent instance.

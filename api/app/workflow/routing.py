@@ -61,7 +61,8 @@ def route_after_orchestrate(state: MovieNightState) -> str:
     Routes to:
     - END if clarification is needed (response already set)
     - find_movies if route is movies or hybrid (need candidates)
-    - rag_retrieve for rag route or any unknown fallback
+    - rag_retrieve for rag route
+    - END for any unknown route (clarification response set by the node)
 
     Args:
         state: Current workflow state.
@@ -77,7 +78,11 @@ def route_after_orchestrate(state: MovieNightState) -> str:
     if route in ("movies", "hybrid"):
         return "find_movies"
 
-    return "rag_retrieve"
+    if route == "rag":
+        return "rag_retrieve"
+
+    logger.warning("Unknown route '%s' after orchestration; routing to END", route)
+    return END
 
 
 def route_after_find_movies_for_hybrid(state: MovieNightState) -> str:

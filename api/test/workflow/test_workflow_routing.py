@@ -22,8 +22,11 @@ class TestRouteAfterOrchestrate:
     def test_routes_to_rag_retrieve_for_rag_route(self):
         assert route_after_orchestrate({"route": "rag"}) == "rag_retrieve"
 
-    def test_routes_to_rag_retrieve_for_unknown_route(self):
-        assert route_after_orchestrate({"route": "unknown"}) == "rag_retrieve"
+    def test_routes_to_end_for_unknown_route(self):
+        assert route_after_orchestrate({"route": "unknown"}) == END
+
+    def test_routes_to_end_for_none_route(self):
+        assert route_after_orchestrate({"route": None}) == END
 
     def test_routes_to_end_for_clarification(self):
         assert route_after_orchestrate({"route": "clarification"}) == END

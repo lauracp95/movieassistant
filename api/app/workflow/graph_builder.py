@@ -80,9 +80,9 @@ class MovieNightWorkflow:
     def _build_graph(self) -> StateGraph:
         """Build and compile the workflow graph.
 
-        The graph is fixed: RAG retrieval/response for system questions
-        and unknown routes, movie candidate retrieval, recommendation
-        writing, and evaluator retry loop are always present.
+        The graph is fixed: RAG retrieval/response for system questions,
+        movie candidate retrieval, recommendation writing, and evaluator
+        retry loop are always present. Unknown routes default to clarification.
 
         Returns:
             Compiled StateGraph ready for execution.
