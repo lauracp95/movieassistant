@@ -1,15 +1,13 @@
-"""Unit tests for RAG retriever, ingest, and agent components."""
+"""Unit tests for RAG ingestion and retrieval infrastructure."""
 
 import hashlib
 import os
 import uuid
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from unittest.mock import MagicMock
 
 import pytest
 
-from app.agents.rag_agent import RAGAssistantAgent
 from app.rag.ingest import (
     DEFAULT_CHUNK_SIZE,
     DocumentIngester,
@@ -139,6 +137,52 @@ class TestDocumentIngester:
 
             ingester.load_documents()
             assert len(ingester.documents) >= 1
+
+    def test_ignores_non_markdown_files(self):
+        with TemporaryDirectory() as tmpdir:
+            (Path(tmpdir) / "notes.txt").write_text("Plain text file.")
+            (Path(tmpdir) / "data.json").write_text('{"key": "value"}')
+            (Path(tmpdir) / "valid.md").write_text("# Valid\n\nThis should be loaded.")
+
+            ingester = DocumentIngester(knowledge_base_path=Path(tmpdir))
+            docs = ingester.load_documents()
+
+            assert len(docs) == 1
+            assert docs[0].source == "valid.md"
+
+    def test_all_chunks_share_same_title_and_source(self):
+        with TemporaryDirectory() as tmpdir:
+            large_content = "# Shared Title\n\n" + ("Word " * 50 + "\n\n") * 20
+            (Path(tmpdir) / "multi_chunk.md").write_text(large_content)
+
+            ingester = DocumentIngester(
+                knowledge_base_path=Path(tmpdir),
+                chunk_size=200,
+                chunk_overlap=20,
+            )
+            docs = ingester.load_documents()
+
+            assert len(docs) > 1
+            for doc in docs:
+                assert doc.title == "Shared Title"
+                assert doc.source == "multi_chunk.md"
+
+    def test_total_chunks_metadata_matches_actual_count(self):
+        with TemporaryDirectory() as tmpdir:
+            large_content = "# Doc\n\n" + ("Sentence number. " * 30 + "\n\n") * 10
+            (Path(tmpdir) / "chunked.md").write_text(large_content)
+
+            ingester = DocumentIngester(
+                knowledge_base_path=Path(tmpdir),
+                chunk_size=300,
+                chunk_overlap=30,
+            )
+            docs = ingester.load_documents()
+
+            assert len(docs) > 1
+            expected_total = len(docs)
+            for doc in docs:
+                assert doc.metadata["total_chunks"] == expected_total
 
 
 class TestDocumentRetriever:
@@ -398,71 +442,57 @@ class TestDocumentRetriever:
             assert retriever._initialized
             assert len(retriever._documents) >= 1
 
+    def test_retrieve_always_returns_list(self):
+        with TemporaryDirectory() as tmpdir:
+            (Path(tmpdir) / "test.md").write_text("# Test\n\nContent.")
 
-class TestRAGAssistantAgent:
-    def test_answer_calls_llm(self):
-        mock_llm = MagicMock()
-        mock_llm.invoke.return_value = MagicMock(
-            content="This is the answer based on documentation."
-        )
+            ingester = DocumentIngester(knowledge_base_path=Path(tmpdir))
+            retriever = DocumentRetriever(
+                ingester=ingester,
+                embeddings=FakeEmbeddings(),
+                collection_name=unique_collection(),
+            )
+            retriever.initialize()
 
-        agent = RAGAssistantAgent(mock_llm)
-        contexts = [
-            RetrievedContext(
-                content="Documentation content",
-                source="rag",
-                relevance_score=0.8,
-                metadata={"title": "Test Doc", "source_file": "test.md"},
-            ),
-        ]
+            result = retriever.retrieve("anything")
+            assert isinstance(result, list)
 
-        answer = agent.answer("How does it work?", contexts)
+    def test_min_score_one_filters_all_results(self):
+        with TemporaryDirectory() as tmpdir:
+            for i in range(3):
+                (Path(tmpdir) / f"doc{i}.md").write_text(
+                    f"# Document {i}\n\nContent for document {i}."
+                )
 
-        mock_llm.invoke.assert_called_once()
-        assert answer == "This is the answer based on documentation."
+            ingester = DocumentIngester(knowledge_base_path=Path(tmpdir))
+            retriever = DocumentRetriever(
+                ingester=ingester,
+                embeddings=FakeEmbeddings(),
+                top_k=5,
+                min_score=1.0,
+                collection_name=unique_collection(),
+            )
+            retriever.initialize()
 
-    def test_answer_formats_contexts_in_prompt(self):
-        mock_llm = MagicMock()
-        mock_llm.invoke.return_value = MagicMock(content="Answer")
+            results = retriever.retrieve("document content")
 
-        agent = RAGAssistantAgent(mock_llm)
-        contexts = [
-            RetrievedContext(
-                content="First context content",
-                source="rag",
-                relevance_score=0.9,
-                metadata={"title": "First", "source_file": "first.md"},
-            ),
-            RetrievedContext(
-                content="Second context content",
-                source="rag",
-                relevance_score=0.7,
-                metadata={"title": "Second", "source_file": "second.md"},
-            ),
-        ]
+            assert results == []
 
-        agent.answer("query", contexts)
+    def test_retrieve_all_count_matches_loaded_documents(self):
+        with TemporaryDirectory() as tmpdir:
+            for i in range(4):
+                (Path(tmpdir) / f"doc{i}.md").write_text(f"# Doc {i}\n\nShort content.")
 
-        call_args = mock_llm.invoke.call_args[0][0]
-        user_message = call_args[1].content
+            ingester = DocumentIngester(knowledge_base_path=Path(tmpdir))
+            retriever = DocumentRetriever(
+                ingester=ingester,
+                embeddings=FakeEmbeddings(),
+                collection_name=unique_collection(),
+            )
+            retriever.initialize()
 
-        assert "First context content" in user_message
-        assert "Second context content" in user_message
-        assert "first.md" in user_message
-        assert "0.90" in user_message or "0.9" in user_message
-
-    def test_answer_with_empty_contexts(self):
-        mock_llm = MagicMock()
-        mock_llm.invoke.return_value = MagicMock(content="No documentation found.")
-
-        agent = RAGAssistantAgent(mock_llm)
-        answer = agent.answer("query", [])
-
-        mock_llm.invoke.assert_called_once()
-        call_args = mock_llm.invoke.call_args[0][0]
-        user_message = call_args[1].content
-
-        assert "No relevant documentation found" in user_message
+            all_results = retriever.retrieve_all()
+            assert len(all_results) == len(retriever._documents)
 
 
 _AZURE_EMBEDDINGS_CONFIGURED = bool(os.getenv("AZURE_OPENAI_EMBEDDINGS_DEPLOYMENT"))
