@@ -16,6 +16,8 @@ from app.workflow.nodes import (
     create_evaluate_node,
     create_find_movies_node,
     create_input_orchestrate_node,
+    create_noop_rag_respond_node,
+    create_noop_rag_retrieve_node,
     create_rag_respond_node,
     create_rag_retrieve_node,
     create_write_recommendation_node,
@@ -44,15 +46,16 @@ class MovieNightWorkflow:
     Encapsulates the graph construction and provides a simple interface
     for executing the workflow with a user message.
 
-    All agents are required. The graph is fixed with no optional branches.
+    RAG agents are optional — when not provided, RAG routes return a
+    graceful fallback message and hybrid routes skip context retrieval.
     """
 
     def __init__(
         self,
         input_agent: InputOrchestratorAgent,
         movie_finder: MovieFinderAgent,
-        rag_retriever: DocumentRetriever,
-        rag_agent: RAGAssistantAgent,
+        rag_retriever: DocumentRetriever | None,
+        rag_agent: RAGAssistantAgent | None,
         recommendation_writer: RecommendationWriterAgent,
         evaluator: EvaluatorAgent,
     ) -> None:
@@ -62,8 +65,8 @@ class MovieNightWorkflow:
             input_agent: The InputOrchestratorAgent for route classification
                 (movies/rag/hybrid).
             movie_finder: The MovieFinderAgent for candidate retrieval from TMDB or in-memory.
-            rag_retriever: The DocumentRetriever for knowledge base retrieval.
-            rag_agent: The RAGAssistantAgent for grounded answers from docs.
+            rag_retriever: The DocumentRetriever for knowledge base retrieval (None to disable).
+            rag_agent: The RAGAssistantAgent for grounded answers from docs (None to disable).
             recommendation_writer: The RecommendationWriterAgent for grounded prose.
             evaluator: The EvaluatorAgent for draft validation with retry loop.
         """
@@ -75,6 +78,7 @@ class MovieNightWorkflow:
         self._rag_agent = rag_agent
         self._recommendation_writer = recommendation_writer
         self._evaluator = evaluator
+        self._rag_enabled = rag_retriever is not None and rag_agent is not None
         self._graph = self._build_graph()
 
     def _build_graph(self) -> StateGraph:
@@ -90,8 +94,12 @@ class MovieNightWorkflow:
         builder = StateGraph(MovieNightState)
 
         builder.add_node("orchestrate", create_input_orchestrate_node(self._input_agent))
-        builder.add_node("rag_retrieve", create_rag_retrieve_node(self._rag_retriever))
-        builder.add_node("rag_respond", create_rag_respond_node(self._rag_agent))
+        if self._rag_enabled:
+            builder.add_node("rag_retrieve", create_rag_retrieve_node(self._rag_retriever))
+            builder.add_node("rag_respond", create_rag_respond_node(self._rag_agent))
+        else:
+            builder.add_node("rag_retrieve", create_noop_rag_retrieve_node())
+            builder.add_node("rag_respond", create_noop_rag_respond_node())
         builder.add_node("find_movies", create_find_movies_node(self._movie_finder))
 
         builder.add_edge(START, "orchestrate")
@@ -117,10 +125,16 @@ class MovieNightWorkflow:
             "write_recommendation",
             create_write_recommendation_node(self._recommendation_writer),
         )
-        builder.add_node(
-            "rag_retrieve_hybrid",
-            create_rag_retrieve_node(self._rag_retriever),
-        )
+        if self._rag_enabled:
+            builder.add_node(
+                "rag_retrieve_hybrid",
+                create_rag_retrieve_node(self._rag_retriever),
+            )
+        else:
+            builder.add_node(
+                "rag_retrieve_hybrid",
+                create_noop_rag_retrieve_node(),
+            )
 
         builder.add_conditional_edges(
             "find_movies",

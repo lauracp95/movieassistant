@@ -304,6 +304,40 @@ def create_evaluate_node(
     return evaluate
 
 
+_RAG_DISABLED_MESSAGE = (
+    "I'm sorry, the knowledge base is currently unavailable. "
+    "I can still help you find and recommend movies — just tell me what you're in the mood for!"
+)
+
+
+def create_noop_rag_retrieve_node() -> Callable[[MovieNightState], dict]:
+    """Create a no-op RAG retrieve node for when RAG is disabled.
+
+    Returns:
+        A node function that returns empty retrieved_contexts.
+    """
+
+    def noop_rag_retrieve(state: MovieNightState) -> dict:
+        logger.info("RAG retrieve node (no-op): RAG disabled, returning empty contexts")
+        return {"retrieved_contexts": []}
+
+    return noop_rag_retrieve
+
+
+def create_noop_rag_respond_node() -> Callable[[MovieNightState], dict]:
+    """Create a no-op RAG respond node for when RAG is disabled.
+
+    Returns:
+        A node function that returns a fallback message.
+    """
+
+    def noop_rag_respond(state: MovieNightState) -> dict:
+        logger.info("RAG respond node (no-op): RAG disabled, returning fallback")
+        return {"final_response": _RAG_DISABLED_MESSAGE}
+
+    return noop_rag_respond
+
+
 def create_rag_retrieve_node(
     retriever: DocumentRetriever,
 ) -> Callable[[MovieNightState], dict]:

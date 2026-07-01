@@ -46,9 +46,10 @@ class Settings(BaseSettings):
         ...,
         description="Azure OpenAI deployment name for the chat model"
     )
-    azure_openai_embeddings_deployment: str = Field(
-        ...,
-        description="Azure OpenAI deployment name for the text-embedding model (used by the RAG retriever)"
+    azure_openai_embeddings_deployment: str | None = Field(
+        default=None,
+        description="Azure OpenAI deployment name for the text-embedding model (used by the RAG retriever). "
+        "If not set, RAG features are disabled."
     )
 
     # Optional fields with defaults

@@ -96,22 +96,29 @@ async def lifespan(app: FastAPI):
         recommendation_writer = RecommendationWriterAgent(writer_llm)
         evaluator = EvaluatorAgent(evaluator_llm)
 
-        embeddings = AzureOpenAIEmbeddings(
-            azure_endpoint=settings.azure_openai_endpoint,
-            api_key=settings.azure_openai_api_key,
-            api_version=settings.azure_openai_api_version,
-            azure_deployment=settings.azure_openai_embeddings_deployment,
-        )
-        rag_retriever = create_retriever(
-            embeddings=embeddings,
-            persist_directory=settings.chroma_persist_directory,
-            collection_name=settings.chroma_collection_name,
-        )
-        rag_agent = RAGAssistantAgent(rag_llm)
-        logger.info(
-            "RAG retriever initialized with %d document chunks",
-            len(rag_retriever._documents),
-        )
+        rag_retriever = None
+        rag_agent = None
+        if settings.azure_openai_embeddings_deployment:
+            embeddings = AzureOpenAIEmbeddings(
+                azure_endpoint=settings.azure_openai_endpoint,
+                api_key=settings.azure_openai_api_key,
+                api_version=settings.azure_openai_api_version,
+                azure_deployment=settings.azure_openai_embeddings_deployment,
+            )
+            rag_retriever = create_retriever(
+                embeddings=embeddings,
+                persist_directory=settings.chroma_persist_directory,
+                collection_name=settings.chroma_collection_name,
+            )
+            rag_agent = RAGAssistantAgent(rag_llm)
+            logger.info(
+                "RAG retriever initialized with %d document chunks",
+                len(rag_retriever._documents),
+            )
+        else:
+            logger.warning(
+                "AZURE_OPENAI_EMBEDDINGS_DEPLOYMENT not set — RAG features disabled"
+            )
 
         workflow = MovieNightWorkflow(
             input_agent=input_agent,
@@ -126,9 +133,10 @@ async def lifespan(app: FastAPI):
         guardrail_service = GuardrailService(guardrail_llm, settings)
         initialize_guardrails(guardrail_service)
         logger.info("Guardrail service initialized (enabled=%s)", settings.guardrail_enabled)
+        rag_status = "enabled" if rag_retriever else "disabled"
         logger.info(
             f"Movie Assistant workflow initialized successfully "
-            f"(finder: {type(movie_finder).__name__}, RAG: enabled)"
+            f"(finder: {type(movie_finder).__name__}, RAG: {rag_status})"
         )
 
     except ValidationError as e:
