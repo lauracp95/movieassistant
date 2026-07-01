@@ -1,0 +1,47 @@
+---
+description: Safety, authorship, and behavioral rules for AI agent working on this project
+alwaysApply: false
+---
+
+# Before Making Changes
+
+- Read existing implementations before creating new files or classes
+- Check if the pattern you need already exists (factory, ABC, node wiring)
+- Extend existing test classes rather than creating new test files for the same domain
+- Do not refactor or rename existing code unless the user explicitly asks for it
+
+# Destructive Actions
+
+- Ask before deleting or replacing files, especially in `knowledge_base/` and `workflow/`
+- Ask before modifying the LangGraph graph topology (adding/removing nodes or edges)
+- Ask before changing prompt constants in `llm/prompts.py`
+- Ask before modifying `settings.py` fields or required env vars
+- Never remove fallback/resilience logic without explicit approval
+
+# External Services
+
+- Never make live calls to Azure OpenAI, TMDB, or LangSmith during development unless the user asks
+- Do not add new external dependencies or API integrations without approval
+- Do not modify `.env` or `.env.example` without stating the change
+
+# State and Workflow Safety
+
+- Do not remove fields from `MovieNightState` — other nodes may depend on them
+- Do not change evaluation thresholds (`PASS_THRESHOLD`, `MAX_RETRIES`) without asking
+- When modifying routing logic, verify all existing routes still work
+
+# Assumptions
+
+- State your assumptions about intended behavior before implementing ambiguous features
+- If a feature (like user memory or MCP tools) is not yet implemented, ask whether to scaffold it or skip
+
+# Authorship
+
+- Never sign generated content as coming from Cursor or AI
+- All generated code, docs, and commit messages should appear as written by the user
+
+# Completing Work
+
+- Run `pytest` (or confirm testability) before declaring a task done
+- Summarize what changed and what still needs manual verification
+- If tests cannot run locally (missing Azure keys), state that clearly

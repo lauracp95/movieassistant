@@ -1,0 +1,80 @@
+---
+description: Project rules for architecture, LangGraph workflow, RAG, and testing
+alwaysApply: true
+---
+
+# Project Structure
+
+- Two-module monorepo: `api/` (FastAPI + LangGraph backend) and `ui/` (Streamlit chat client)
+- Managed with **uv** and Python 3.14+
+- Configuration via root `.env` loaded by `api/app/settings.py` (Pydantic BaseSettings)
+- Docker Compose for local multi-service runs
+
+# Architecture
+
+- Package-by-domain: `agents/`, `workflow/`, `rag/`, `schemas/`, `integrations/`, `guardrails/`
+- ABC for swappable implementations (e.g., `MovieFinderAgent` → TMDB or in-memory)
+- Factory functions for LLM models, retrievers, and graph nodes
+- Module-level singletons initialized in FastAPI `lifespan`, injected into routers
+- Structured LLM output via `llm.with_structured_output(PydanticModel)`
+- Resilience: every LLM call has a deterministic fallback on failure
+
+# LangGraph Conventions
+
+- Single `StateGraph(MovieNightState)` compiled in `MovieNightWorkflow`
+- State is a `TypedDict(total=False)` — fields are added incrementally by nodes
+- Nodes are closures returned by `create_*_node(agent)` factory functions
+- Routing logic lives in pure functions in `workflow/routing.py`
+- Evaluation loop: writer → evaluator → retry (max 3), tracked via `retry_count` and `rejected_titles`
+- When adding a new node: create agent class, add factory node function, wire into graph with conditional edges
+
+# Adding New Agents
+
+- Create agent class in `api/app/agents/` with a clear single responsibility
+- Define any structured output models in `api/app/schemas/`
+- Create a `create_<name>_node()` factory in `workflow/nodes.py`
+- Add new state fields (if needed) to `MovieNightState` with `total=False`
+- Wire the node into the graph in `workflow/graph.py` with routing in `workflow/routing.py`
+- Add unit tests in `api/test/agents/` and workflow integration tests in `api/test/workflow/`
+
+# RAG
+
+- Knowledge base: markdown files in `api/app/knowledge_base/`
+- Ingestion: 500-char chunks, 50-char overlap, paragraph-aware splitting
+- Storage: ChromaDB (ephemeral by default, persistent if `CHROMA_PERSIST_DIRECTORY` set)
+- Retrieval: similarity search with relevance scores, top_k=3
+- When adding knowledge: create a `.md` file in `knowledge_base/`, restart to re-ingest
+
+# Prompts
+
+- All prompts centralized in `api/app/llm/prompts.py` as module-level constants
+- Do not scatter prompt strings in agent classes or node functions
+
+# Testing
+
+- pytest with class-based test groupings mirroring source structure
+- Mock agents at workflow boundaries with `MagicMock(spec=...)`
+- Use `InMemoryMovieFinderAgent` for finder integration tests
+- Use `make_movie()` factory for test data
+- Use `TestClient(app, raise_server_exceptions=False)` for API tests
+- No live Azure OpenAI or TMDB calls in default test suite
+- Before creating new tests: inspect existing test files, extend existing classes when possible
+
+# Streamlit UI
+
+- Thin HTTP client only — all logic belongs in the API
+- Chat history is client-side session state, not persisted
+- Debug info rendering mirrors `DebugInfo` schema from API response
+
+# Code Style
+
+- Python 3.14+ syntax: `list[str]`, `str | None`, pattern matching
+- Google-style docstrings on public classes and functions
+- No inline code comments unless explicitly requested
+- `__all__` exports in package `__init__.py` files
+- Logging via `logging.getLogger(__name__)` — never print()
+
+# File Formatting
+
+- Preserve existing formatting and line endings
+- Do not reorganize imports unless directly related to the change
